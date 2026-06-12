@@ -1,5 +1,11 @@
-import { supabase } from '../../../server/src/config/supabase.js';
-import { exportToCSV, exportToQuickBooks, exportToXero, saveExportRecord } from '../../../server/src/services/exports.js';
+import { exportToCSV, exportToQuickBooks, exportToXero, saveExportRecord } from '../../services/exports.js';
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
+
 
 export async function handler(event, context) {
   const headers = {

@@ -1,8 +1,9 @@
+import os from 'os';
 import sharp from 'sharp';
 import mammoth from 'mammoth';
 import xlsx from 'xlsx';
 import fs from 'fs/promises';
-import { pdfToPng } from 'pdf-to-png-converter';
+import { fromPath } from 'pdf2pic';
 import { PDFDocument } from 'pdf-lib';
 import AdmZip from 'adm-zip';
 
@@ -89,26 +90,38 @@ export async function processDocument(filePath, mimetype) {
     return { type: 'image', content: optimized.toString('base64') };
   }
 
-  if (type === 'pdf') {
+    if (type === 'pdf') {
     try {
-      const pngPages = await pdfToPng(filePath, {
-        pagesToProcess: [1],
-        viewportScale: 4.0
+      const convert = fromPath(filePath, {
+        density: 300,
+        format: 'jpeg',
+        width: 2048,
+        height: 2048,
+        quality: 100,
+        savePath: os.tmpdir()
       });
 
-      if (!pngPages?.[0]?.content) {
-        throw new Error('PDF conversion failed');
+      const page = await convert(1); // Convert page 1
+
+      if (!page || !page.base64) {
+        throw new Error('PDF conversion failed: no page extracted');
       }
 
-      const optimized = await sharp(pngPages[0].content)
+      const imageBuffer = Buffer.from(page.base64, 'base64');
+
+      const optimized = await sharp(imageBuffer)
         .jpeg({ quality: 100 })
         .toBuffer();
 
-      return { type: 'image', content: optimized.toString('base64') };
+      return {
+        type: 'image',
+        content: optimized.toString('base64')
+      };
     } catch (pdfError) {
       throw new Error(`PDF processing failed: ${pdfError.message}`);
     }
   }
+
 
   if (type === 'docx') {
     const result = await mammoth.extractRawText({ path: filePath });

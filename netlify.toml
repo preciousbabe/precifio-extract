@@ -1,16 +1,25 @@
 [build]
   command = "npm run build"
-  publish = "client/dist"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+[dev]
+command = "npm run dev -- --strictPort"
+targetPort = 5173
+port = 8888
+autoLaunch = true
 
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"
 
 [functions.extract]
-  included_files = ["server/src/**"]
+  included_files = ["services/**", "schemas/**", "config/**", "middleware/**"]
 
 [functions.export]
-  included_files = ["server/src/**"]
+  included_files = ["services/**", "schemas/**", "config/**", "middleware/**"]
 
 [[redirects]]
   from = "/api/*"

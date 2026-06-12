@@ -1,4 +1,3 @@
-import { openai } from '../config/openai.js';
 
 const SYSTEM_PROMPT = `
 You are a precise financial document data extractor. Extract ONLY what is visible.

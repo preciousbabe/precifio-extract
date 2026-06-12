@@ -1,18 +1,22 @@
 import { TextractClient, AnalyzeExpenseCommand, AnalyzeDocumentCommand } from '@aws-sdk/client-textract';
-import dotenv from 'dotenv';
-dotenv.config();
 
-const client = new TextractClient({
-  region: process.env.AWS_REGION || 'us-east-1',
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
-  }
-});
+const client = process.env.AWS_ACCESS_KEY_ID &&
+               process.env.AWS_SECRET_ACCESS_KEY
+  ? new TextractClient({
+      region: process.env.AWS_REGION || 'us-east-1',
+      credentials: {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+      }
+    })
+  : null;
 
 // Check if AWS is configured
 export function isAwsConfigured() {
-  return !!client;
+  return (
+    !!process.env.AWS_ACCESS_KEY_ID &&
+    !!process.env.AWS_SECRET_ACCESS_KEY
+  );
 }
 
 // Map document types to Textract features
@@ -26,6 +30,10 @@ const DOCUMENT_CONFIG = {
 };
 
 export async function extractWithAWS(fileBuffer, documentType = 'invoice') {
+  if (!client) {
+  throw new Error('AWS Textract not configured');
+  }
+  
   const config = DOCUMENT_CONFIG[documentType] || { expense: true, tables: true };
   
   console.log(`AWS Textract: Processing ${documentType}`);

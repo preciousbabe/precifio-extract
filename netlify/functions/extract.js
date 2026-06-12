@@ -1,17 +1,22 @@
-import { processDocument, countPages, SUPPORTED_TYPES } from '../../../server/src/services/documentProcessor.js';
-import { extractWithAWS, isAwsConfigured } from '../../../server/src/services/awsTextract.js';
-import { extractWithGPT, normalizeExtraction } from '../../../server/src/services/gptExtractor.js';
-import { validateExtraction } from '../../../server/src/services/validator.js';
-import { InvoiceSchema } from '../../../server/src/schemas/invoice.schema.js';
-import { calculateConfidence } from '../../../server/src/services/confidenceEngine.js';
-import { mergeExtraction } from '../../../server/src/services/mergeEngine.js';
-import { getUserCredits, deductCredits, addCredits } from '../../../server/src/services/creditEngine.js';
-import { supabase } from '../../../server/src/config/supabase.js';
+import { processDocument, countPages, SUPPORTED_TYPES } from '../../services/documentProcessor.js';
+import { extractWithAWS, isAwsConfigured } from '../../services/awsTextract.js';
+import { extractWithGPT, normalizeExtraction } from '../../services/gptExtractor.js';
+import { validateExtraction } from '../../services/validator.js';
+import { InvoiceSchema } from '../../schemas/invoice.schema.js';
+import { calculateConfidence } from '../../services/confidenceEngine.js';
+import { mergeExtraction } from '../../services/mergeEngine.js';
+import { getUserCredits, deductCredits, addCredits } from '../../services/creditEngine.js';
 import { v4 as uuidv4 } from 'uuid';
 import Busboy from 'busboy';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
 // ============================================
 // MULTIPART PARSER (replaces multer for Netlify)
