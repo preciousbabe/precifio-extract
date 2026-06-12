@@ -1,7 +1,6 @@
-// Get current session from token
-const { createClient } = require('@supabase/supabase-js');
+import { createClient } from '@supabase/supabase-js';
 
-exports.handler = async (event, context) => {
+export const handler = async (event, context) => {
   if (event.httpMethod !== 'GET') {
     return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
   }
@@ -14,7 +13,7 @@ exports.handler = async (event, context) => {
 
   try {
     const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
-    
+
     const { data: { user }, error } = await supabase.auth.getUser(token);
 
     if (error || !user) {

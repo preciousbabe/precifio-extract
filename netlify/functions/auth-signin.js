@@ -1,9 +1,8 @@
-// Company-name based login
-const { createClient } = require('@supabase/supabase-js');
+import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
-exports.handler = async (event, context) => {
+export const handler = async (event, context) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
   }
@@ -26,10 +25,9 @@ exports.handler = async (event, context) => {
       return { statusCode: 401, body: JSON.stringify({ error: 'Company not found' }) };
     }
 
-    // 2. Sign in with email + password using admin (or regular auth)
-    // We use the public client here since we need to verify password
+    // 2. Sign in with email + password using public client
     const publicClient = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
-    
+
     const { data: authData, error: authError } = await publicClient.auth.signInWithPassword({
       email: profile.email,
       password: password

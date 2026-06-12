@@ -1,11 +1,9 @@
-// Handles: register user, insert profile manually, send welcome email via Resend
-const { createClient } = require('@supabase/supabase-js');
-const fetch = require('node-fetch');
+import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 
-exports.handler = async (event, context) => {
+export const handler = async (event, context) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
   }
@@ -17,11 +15,11 @@ exports.handler = async (event, context) => {
   }
 
   try {
-    // 1. Create auth user in Supabase (but we control the flow)
+    // 1. Create auth user in Supabase (auto-confirmed since we handle emails via Resend)
     const { data: authData, error: authError } = await supabase.auth.admin.createUser({
       email,
       password,
-      email_confirm: true, // Auto-confirm since we handle emails via Resend
+      email_confirm: true,
       user_metadata: { full_name: fullName, company_name: companyName }
     });
 
@@ -61,7 +59,7 @@ exports.handler = async (event, context) => {
             <p>You have <strong>20 credits</strong> to start extracting documents.</p>
             <p>Login with your company name: <strong>${companyName}</strong></p>
             <br/>
-            <a href="https://precifio.app" style="background: #1e40af; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">Go to Dashboard</a>
+            <a href="https://extract.precifio.app" style="background: #1e40af; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">Go to Dashboard</a>
           </div>
         `
       })
@@ -69,8 +67,8 @@ exports.handler = async (event, context) => {
 
     return {
       statusCode: 200,
-      body: JSON.stringify({ 
-        success: true, 
+      body: JSON.stringify({
+        success: true,
         message: 'Account created successfully! Check your email.',
         user: { id: userId, email, fullName, companyName }
       })

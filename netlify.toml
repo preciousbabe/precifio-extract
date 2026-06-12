@@ -6,7 +6,7 @@
   NODE_VERSION = "20"
 
 [dev]
-command = "npm run dev -- --strictPort"
+command = "vite"
 targetPort = 5173
 port = 8888
 autoLaunch = true

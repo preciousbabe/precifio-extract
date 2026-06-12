@@ -1,9 +1,6 @@
-// Generic email sender for receipts, notifications, etc.
-const fetch = require('node-fetch');
-
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 
-exports.handler = async (event, context) => {
+export const handler = async (event, context) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
   }
