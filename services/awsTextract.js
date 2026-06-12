@@ -1,12 +1,12 @@
 import { TextractClient, AnalyzeExpenseCommand, AnalyzeDocumentCommand } from '@aws-sdk/client-textract';
 
-const client = process.env.AWS_ACCESS_KEY_ID &&
-               process.env.AWS_SECRET_ACCESS_KEY
+const client = process.env.PRECIFIO_AWS_ACCESS_KEY_ID &&
+               process.env.PRECIFIO_AWS_SECRET_ACCESS_KEY
   ? new TextractClient({
-      region: process.env.AWS_REGION || 'us-east-1',
+      region: process.env.PRECIFIO_AWS_REGION || 'us-east-1',
       credentials: {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+        accessKeyId: process.env.PRECIFIO_AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.PRECIFIO_AWS_SECRET_ACCESS_KEY
       }
     })
   : null;
@@ -14,8 +14,8 @@ const client = process.env.AWS_ACCESS_KEY_ID &&
 // Check if AWS is configured
 export function isAwsConfigured() {
   return (
-    !!process.env.AWS_ACCESS_KEY_ID &&
-    !!process.env.AWS_SECRET_ACCESS_KEY
+    !!process.env.PRECIFIO_AWS_ACCESS_KEY_ID &&
+    !!process.env.PRECIFIO_AWS_SECRET_ACCESS_KEY
   );
 }
 
