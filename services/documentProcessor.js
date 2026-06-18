@@ -1,9 +1,7 @@
-import os from 'os';
 import sharp from 'sharp';
 import mammoth from 'mammoth';
 import xlsx from 'xlsx';
 import fs from 'fs/promises';
-import { fromPath } from 'pdf2pic';
 import { PDFDocument } from 'pdf-lib';
 import AdmZip from 'adm-zip';
 
@@ -19,161 +17,157 @@ const SUPPORTED_TYPES = {
   'application/x-zip-compressed': 'zip'
 };
 
-export async function countPages(filePath, mimetype) {
+export async function countPages(input, mimetype) {
   const type = SUPPORTED_TYPES[mimetype];
-  
-  if (!type || type === 'image' || type === 'docx' || type === 'xlsx') {
-    return 1;
-  }
-  
+  if (!type || type === 'image' || type === 'docx' || type === 'xlsx') return 1;
   if (type === 'pdf') {
-    const pdfBytes = await fs.readFile(filePath);
+    const pdfBytes = Buffer.isBuffer(input) ? input : await fs.readFile(input);
     const pdfDoc = await PDFDocument.load(pdfBytes);
     return pdfDoc.getPageCount();
   }
-  
-  if (type === 'zip') {
-    return await countZipPages(filePath);
-  }
-  
+  if (type === 'zip') return await countZipPages(input);
   return 1;
 }
 
-async function countZipPages(zipPath) {
-  const zip = new AdmZip(zipPath);
+async function countZipPages(input) {
+  const zip = Buffer.isBuffer(input) ? new AdmZip(input) : new AdmZip(input);
   const entries = zip.getEntries();
   let totalPages = 0;
-  
   for (const entry of entries) {
     if (entry.isDirectory) continue;
-    
     const ext = entry.entryName.toLowerCase().split('.').pop();
-    
-    if (['jpg', 'jpeg', 'png'].includes(ext)) {
-      totalPages += 1;
-    } else if (ext === 'pdf') {
+    if (['jpg', 'jpeg', 'png'].includes(ext)) totalPages += 1;
+    else if (ext === 'pdf') {
       const pdfBytes = entry.getData();
       const pdfDoc = await PDFDocument.load(pdfBytes);
       totalPages += pdfDoc.getPageCount();
     }
-    // Skip other file types in ZIP
   }
-  
   return totalPages;
 }
 
-export async function processDocument(filePath, mimetype) {
-  const type = SUPPORTED_TYPES[mimetype];
-
-  if (!type) {
-    throw new Error(`Unsupported file type: ${mimetype}`);
+async function extractPdfText(pdfBytes) {
+  let text = '';
+  
+  // Try 1: pdf-parse (ESM-safe)
+  try {
+    const { createRequire } = await import('module');
+    const require = createRequire(import.meta.url);
+    const pdfParse = require('pdf-parse');
+    const result = await pdfParse(pdfBytes, { max: 0 });
+    text = result?.text || '';
+    if (text.trim().length > 20) {
+      console.log('PDF: pdf-parse extracted', text.length, 'chars');
+      return text;
+    }
+  } catch (e) {
+    console.log('PDF: pdf-parse failed:', e.message);
   }
+  
+  // Try 2: pdf2json
+  try {
+    const PDFParser = (await import('pdf2json')).default;
+    const pdfParser = new PDFParser();
+    const result = await new Promise((resolve, reject) => {
+      pdfParser.on('pdfParser_dataReady', resolve);
+      pdfParser.on('pdfParser_dataError', (err) => reject(new Error(err.parserError)));
+      pdfParser.parseBuffer(pdfBytes);
+    });
+    if (result.Pages) {
+      for (const page of result.Pages) {
+        if (page.Texts) {
+          for (const t of page.Texts) {
+            if (t.R) text += t.R.map(r => decodeURIComponent(r.T)).join(' ') + ' ';
+          }
+        }
+        text += '\n';
+      }
+    }
+    if (text.trim().length > 20) {
+      console.log('PDF: pdf2json extracted', text.length, 'chars');
+      return text;
+    }
+  } catch (e) {
+    console.log('PDF: pdf2json failed:', e.message);
+  }
+  
+  return text;
+}
+
+export async function processDocument(input, mimetype) {
+  const type = SUPPORTED_TYPES[mimetype];
+  const isBuffer = Buffer.isBuffer(input);
+  if (!type) throw new Error(`Unsupported file type: ${mimetype}`);
 
   if (type === 'image') {
-    const imageBuffer = await fs.readFile(filePath);
+    const imageBuffer = isBuffer ? input : await fs.readFile(input);
     const metadata = await sharp(imageBuffer).metadata();
     const MAX_SIZE = 2048;
     const needsResize = metadata.width > MAX_SIZE || metadata.height > MAX_SIZE;
-
     let processed = sharp(imageBuffer);
     if (needsResize) {
-      processed = processed.resize(MAX_SIZE, MAX_SIZE, {
-        fit: 'inside',
-        withoutEnlargement: true
-      });
+      processed = processed.resize(MAX_SIZE, MAX_SIZE, { fit: 'inside', withoutEnlargement: true });
     }
-
-    const optimized = await processed
-      .jpeg({ quality: 95, progressive: true })
-      .toBuffer();
-
+    const optimized = await processed.jpeg({ quality: 95, progressive: true }).toBuffer();
     return { type: 'image', content: optimized.toString('base64') };
   }
 
-    if (type === 'pdf') {
-    try {
-      const convert = fromPath(filePath, {
-        density: 300,
-        format: 'jpeg',
-        width: 2048,
-        height: 2048,
-        quality: 100,
-        savePath: os.tmpdir()
-      });
+  if (type === 'pdf') {
+    console.log('=== PDF PROCESSING START ===');
+    const pdfBytes = isBuffer ? input : await fs.readFile(input);
+    console.log('PDF bytes loaded:', pdfBytes.length);
+    
+    if (pdfBytes.length > 15 * 1024 * 1024) throw new Error('PDF too large. Maximum 15MB.');
+    
+    const pdfDoc = await PDFDocument.load(pdfBytes);
+    const pageCount = pdfDoc.getPageCount();
+    console.log('PDF page count:', pageCount);
+    if (pageCount > 50) throw new Error('PDF too long. Maximum 50 pages.');
 
-      const page = await convert(1); // Convert page 1
+    const extractedText = await extractPdfText(pdfBytes);
+    console.log('Final extracted text length:', extractedText.length);
+    console.log('Text preview:', extractedText.substring(0, 300));
+    console.log('=== PDF PROCESSING END ===');
 
-      if (!page || !page.base64) {
-        throw new Error('PDF conversion failed: no page extracted');
-      }
-
-      const imageBuffer = Buffer.from(page.base64, 'base64');
-
-      const optimized = await sharp(imageBuffer)
-        .jpeg({ quality: 100 })
-        .toBuffer();
-
-      return {
-        type: 'image',
-        content: optimized.toString('base64')
-      };
-    } catch (pdfError) {
-      throw new Error(`PDF processing failed: ${pdfError.message}`);
-    }
+    return {
+      type: 'text',
+      content: extractedText || `[PDF Document - ${pageCount} page(s). Please extract all invoice data.]`,
+      buffer: pdfBytes,
+      pageCount
+    };
   }
 
-
   if (type === 'docx') {
-    const result = await mammoth.extractRawText({ path: filePath });
+    const result = isBuffer ? await mammoth.extractRawText({ buffer: input }) : await mammoth.extractRawText({ path: input });
     return { type: 'text', content: result?.value || '' };
   }
 
   if (type === 'xlsx') {
-    const workbook = xlsx.readFile(filePath);
+    const workbook = isBuffer ? xlsx.read(input, { type: 'buffer' }) : xlsx.readFile(input);
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const data = xlsx.utils.sheet_to_json(sheet, { header: 1 });
-
-    const textContent = data
-      .filter(row => Array.isArray(row))
-      .map(row => row.map(cell => cell ?? '').join(' | '))
-      .join('\n');
-
+    const textContent = data.filter(row => Array.isArray(row)).map(row => row.map(cell => cell ?? '').join(' | ')).join('\n');
     return { type: 'text', content: textContent };
   }
 
-  if (type === 'zip') {
-    return await processZip(filePath);
-  }
-
+  if (type === 'zip') return await processZip(input);
   throw new Error(`Unhandled type: ${type}`);
 }
 
-async function processZip(zipPath) {
-  const zip = new AdmZip(zipPath);
+async function processZip(input) {
+  const zip = Buffer.isBuffer(input) ? new AdmZip(input) : new AdmZip(input);
   const entries = zip.getEntries();
   const documents = [];
-
   for (const entry of entries) {
     if (entry.isDirectory) continue;
-    
     const ext = entry.entryName.toLowerCase().split('.').pop();
-    const tempPath = `/tmp/${Date.now()}-${entry.entryName}`;
-    
     if (['jpg', 'jpeg', 'png', 'pdf'].includes(ext)) {
-      await fs.writeFile(tempPath, entry.getData());
-      
+      const fileBuffer = entry.getData();
       const mimeType = ext === 'pdf' ? 'application/pdf' : `image/${ext === 'jpg' ? 'jpeg' : ext}`;
-      const processed = await processDocument(tempPath, mimeType);
-      
-      documents.push({
-        fileName: entry.entryName,
-        ...processed
-      });
-      
-      await fs.unlink(tempPath).catch(() => {});
+      const processed = await processDocument(fileBuffer, mimeType);
+      documents.push({ fileName: entry.entryName, ...processed, buffer: fileBuffer });
     }
   }
-
   return { type: 'batch', documents };
 }
 

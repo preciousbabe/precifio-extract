@@ -16,6 +16,29 @@ const LineItemSchema = z.object({
   tax_amount: z.number().min(0).optional().default(0)
 });
 
+// Confidence engine output schema
+const ConfidenceScoreSchema = z.object({
+  overall: z.number().min(0).max(1).default(0),
+  breakdown: z.object({
+    invoice_number: z.number().min(0).max(1).default(0),
+    vendor_name: z.number().min(0).max(1).default(0),
+    total_amount: z.number().min(0).max(1).default(0),
+    invoice_date: z.number().min(0).max(1).default(0),
+    line_items: z.number().min(0).max(1).default(0),
+    financialConsistency: z.number().min(0).max(1).default(0),
+    structure: z.number().min(0).max(1).default(0),
+  }).default({}),
+  flags: z.object({
+    low_confidence_fields: z.array(z.string()).default([])
+  }).default({ low_confidence_fields: [] }),
+  status: z.enum(['HIGH', 'MEDIUM', 'LOW']).default('LOW')
+}).default({
+  overall: 0,
+  breakdown: {},
+  flags: { low_confidence_fields: [] },
+  status: 'LOW'
+});
+
 export const InvoiceSchema = z.object({
   // ================= CORE =================
   invoice_number: z.string().nullable().default(null),
@@ -81,15 +104,6 @@ export const InvoiceSchema = z.object({
   // ================= METADATA =================
   notes: z.string().nullable().optional().default(null),
 
-  confidence_scores: z.object({
-    invoice_number: z.number().min(0).max(1).default(0),
-    vendor_name: z.number().min(0).max(1).default(0),
-    total_amount: z.number().min(0).max(1).default(0),
-    line_items: z.number().min(0).max(1).default(0)
-  }).default({
-    invoice_number: 0,
-    vendor_name: 0,
-    total_amount: 0,
-    line_items: 0
-  })
+  // ================= CONFIDENCE (engine format) =================
+  confidence_scores: ConfidenceScoreSchema
 });

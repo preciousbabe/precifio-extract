@@ -129,12 +129,7 @@ function normalizeTextractResult(result, documentType) {
       payment_terms: fieldMap['payment terms']?.value || null,
       tax_details: extractTaxDetails(fieldMap),
       category: inferCategory(documentType, fieldMap),
-      confidence: {
-        overall: avgConfidence / 100, // Convert to 0-1 scale
-        fieldScores: Object.fromEntries(
-          Object.entries(fieldMap).map(([k, v]) => [k, (v.confidence || 0) / 100])
-        )
-      }
+    
     }
   };
 }

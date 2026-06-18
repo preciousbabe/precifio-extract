@@ -35,7 +35,7 @@ export const handler = async (event, context) => {
         email,
         full_name: fullName,
         company_name: companyName,
-        credits_remaining: 20,
+        credits_remaining: 10,
         created_at: new Date().toISOString()
       });
 
@@ -56,7 +56,7 @@ export const handler = async (event, context) => {
           <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
             <h2 style="color: #1e40af;">Welcome to Precifio Extract, ${fullName}!</h2>
             <p>Your company <strong>${companyName}</strong> is now registered.</p>
-            <p>You have <strong>20 credits</strong> to start extracting documents.</p>
+            <p>You have <strong>10 credits</strong> to start extracting documents.</p>
             <p>Login with your company name: <strong>${companyName}</strong></p>
             <br/>
             <a href="https://extract.precifio.app" style="background: #1e40af; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">Go to Dashboard</a>
