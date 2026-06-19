@@ -22,13 +22,14 @@ if (typeof globalThis.DOMMatrix === 'undefined') {
   };
 }
 
-import { processDocument, countPages, SUPPORTED_TYPES } from '../../services/documentProcessor.js';
-import { extractWithAWS, isAwsConfigured } from '../../services/awsTextract.js';
-import { extractWithGPT, normalizeExtraction } from '../../services/gptExtractor.js';
-import { validateExtraction } from '../../services/validator.js';
-import { InvoiceSchema } from '../../schemas/invoice.schema.js';
-import { calculateConfidence } from '../../services/confidenceEngine.js';
-import { mergeExtraction } from '../../services/mergeEngine.js';
+import {
+  processDocument,
+  countPages,
+  SUPPORTED_TYPES
+} from '../../services/documentProcessor.js';
+
+import { runExtractionPipeline }
+  from '../../services/extractionPipeline.js';
 import { getUserCredits, deductCredits, addCredits } from '../../services/creditEngine.js';
 import { v4 as uuidv4 } from 'uuid';
 import Busboy from 'busboy';
@@ -114,14 +115,39 @@ export async function handler(event, context) {
   catch (err) { return { statusCode: 400, headers, body: JSON.stringify({ error: 'Failed to parse upload' }) }; }
 
   const file = parsed.files[0];
+
+  if (
+    file.mimetype === 'application/zip' ||
+    file.mimetype === 'application/x-zip-compressed'
+  ) {
+    return {
+      statusCode: 400,
+      headers,
+      body: JSON.stringify({
+        success: false,
+        error: 'ZIP uploads must use /batch-extract endpoint'
+      })
+    };
+  }
+
   if (!file) return { statusCode: 400, headers, body: JSON.stringify({ error: 'No document uploaded' }) };
 
-  const documentType = parsed.fields.documentType || 'invoice';
+  // FIX: Default to 'mixed' so GPT auto-detects document type
+  const documentType = parsed.fields.documentType || 'mixed';
   const docId = uuidv4();
   let creditsDeducted = 0;
 
   try {
     const pageCount = await countPages(file.buffer, file.mimetype);
+
+    if (pageCount > 250) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({ error: 'Document exceeds maximum page limit' })
+      };
+    }
+
     const creditResult = await deductCredits(userId, pageCount);
 
     if (!creditResult.success) {
@@ -131,8 +157,15 @@ export async function handler(event, context) {
     creditsDeducted = pageCount;
 
     const { error: docError } = await supabase.from('documents').insert({
-      id: docId, user_id: userId, file_name: file.filename, file_type: file.mimetype,
-      document_type: documentType, status: 'processing', page_count: pageCount, credits_used: pageCount
+      id: docId,
+      user_id: userId,
+      file_name: file.filename,
+      file_type: file.mimetype,
+      file_size: file.buffer.length,
+      document_type: documentType,
+      status: 'processing',
+      page_count: pageCount,
+      credits_used: pageCount
     });
     if (docError) throw docError;
 
@@ -147,52 +180,67 @@ export async function handler(event, context) {
 
     await auditLog(userId, 'document_uploaded', 'document', docId, { file_name: file.filename, page_count: pageCount, credits_used: pageCount }, event.headers);
 
-    console.log('=== EXTRACT: Processing document ===');
-    const processedDoc = await processDocument(file.buffer, file.mimetype);
-    console.log('Processed type:', processedDoc.type, '| Content length:', processedDoc.content?.length);
+    console.log('=== EXTRACTION PIPELINE START ===');
 
-    if (processedDoc.type === 'batch') throw new Error('ZIP files require batch processing endpoint');
+    const extractionResult = await runExtractionPipeline({
+      fileBuffer: file.buffer,
+      mimeType: file.mimetype,
+      documentType  // 'mixed' lets GPT auto-detect
+    });
 
-    let awsResult = null;
-    if (isAwsConfigured()) {
-      try { awsResult = await extractWithAWS(file.buffer, documentType); }
-      catch (e) { console.warn('AWS failed:', e.message); }
-    }
+    const parsedSchema = extractionResult.extraction;
+    const validation = extractionResult.validation;
+    const confidence = extractionResult.confidence;
 
-    console.log('=== EXTRACT: Calling GPT ===');
-    const rawGpt = await extractWithGPT(processedDoc);
-    console.log('GPT raw - vendor:', rawGpt?.vendor_name, '| total:', rawGpt?.total_amount, '| items:', rawGpt?.line_items?.length);
+    // FIX: Use dbStatus for database, status for response
+    const dbStatus = extractionResult.dbStatus;
+    const pipelineStatus = extractionResult.status;
 
-    const gptResult = normalizeExtraction(rawGpt);
-    console.log('Normalized - vendor:', gptResult.vendor_name, '| total:', gptResult.total_amount);
+    // FIX: Update document with dbStatus (compatible with DocumentList)
+    await supabase.from('documents').update({
+      status: dbStatus,
+      document_type: parsedSchema.document_type,  // Update with GPT-detected type
+      processing_method: extractionResult.processingMethod
+    }).eq('id', docId);
 
-    const extractionData = mergeExtraction({ aws: awsResult?.extracted ?? null, gpt: gptResult });
-    if (!Array.isArray(extractionData.line_items)) extractionData.line_items = [];
+    // FIX: Save extraction with full data
+    await supabase.from('extractions').insert({
+      id: uuidv4(),
+      document_id: docId,
+      version: 1,
+      raw_data: extractionResult.rawExtraction || {},
+      extracted_data: parsedSchema,
+      validation_flags: validation,
+      confidence_scores: confidence
+    });
 
-    const parsedSchema = InvoiceSchema.parse(extractionData);
-    const validation = validateExtraction(parsedSchema);
-    const confidence = calculateConfidence(parsedSchema);
-
-    const { data: dbExtraction } = await supabase.from('extractions').insert({
-      document_id: docId, raw_data: extractionData, extracted_data: parsedSchema,
-      validation_flags: validation.flags, confidence_scores: confidence, version: 1
-    }).select().single();
-
-    const finalStatus = validation.requiresReview ? 'review_required' : 'completed';
-    await supabase.from('documents').update({ status: finalStatus, processing_method: awsResult ? 'aws-textract' : 'gpt-only' }).eq('id', docId);
-
-    await auditLog(userId, 'extraction_completed', 'extraction', dbExtraction?.id, { document_id: docId, status: finalStatus, confidence: confidence.overall }, event.headers);
+    await auditLog(
+      userId,
+      'extraction_completed',
+      'document',
+      docId,
+      { document_id: docId, status: dbStatus, confidence: confidence.overall },
+      event.headers
+    );
 
     const responsePayload = {
-      success: true, documentId: docId, extractionId: dbExtraction?.id,
-      extraction: parsedSchema, validation, confidence,
-      pageCount, creditsUsed: pageCount, creditsRemaining: creditResult.newBalance,
-      status: finalStatus === 'review_required' ? 'REVIEW_REQUIRED' : 'AUTO_APPROVED'
+      success: true,
+      documentId: docId,
+      extractionId: docId,
+      extraction: parsedSchema,
+      validation,
+      confidence,
+      storagePath,
+      pageCount,
+      creditsUsed: pageCount,
+      creditsRemaining: creditResult.newBalance,
+      status: pipelineStatus  // 'REVIEW_REQUIRED' or 'AUTO_APPROVED' for frontend
     };
 
     console.log('=== EXTRACT: SUCCESS ===');
-    console.log('Vendor:', parsedSchema.vendor_name, '| Total:', parsedSchema.total_amount, '| Status:', finalStatus);
+    console.log('Doc Type:', parsedSchema.document_type, '| Vendor:', parsedSchema.vendor_name, '| Total:', parsedSchema.total_amount, '| Status:', dbStatus);
 
+    responsePayload.source = 'single';
     return { statusCode: 200, headers, body: JSON.stringify(responsePayload) };
 
   } catch (error) {

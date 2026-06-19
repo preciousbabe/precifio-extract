@@ -1,6 +1,7 @@
 import { useState } from 'react';
 
-const API_URL = '/api/extract';
+const EXTRACT_URL = '/.netlify/functions/extract';
+const BATCH_URL = '/.netlify/functions/batch-extract';
 
 export function useExtraction() {
   const [loading, setLoading] = useState(false);
@@ -8,37 +9,46 @@ export function useExtraction() {
   const [error, setError] = useState(null);
 
   const extract = async (file, documentType = 'invoice', authToken = null) => {
-    setLoading(true);
-    setError(null);
-    
-    const formData = new FormData();
-    formData.append('document', file);
-    formData.append('documentType', documentType);
-    
-    const headers = {};
-    if (authToken) {
-      headers['Authorization'] = `Bearer ${authToken}`;
-    }
-    
-    try {
-      const res = await fetch(API_URL, {
-        method: 'POST',
-        body: formData,
-        headers
-      });
-      
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
-      
-      setResult(data);
-      return data;
-    } catch (err) {
-      setError(err.message);
-      return null;
-    } finally {
-      setLoading(false);
-    }
-  };
+  setLoading(true);
+  setError(null);
+
+  const isZip =
+    file.type === 'application/zip' ||
+    file.type === 'application/x-zip-compressed' ||
+    file.name?.endsWith('.zip');
+
+  const endpoint = isZip ? BATCH_URL : EXTRACT_URL;
+
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('documentType', documentType);
+
+  const headers = {};
+  if (authToken) {
+    headers['Authorization'] = `Bearer ${authToken}`;
+  }
+
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      body: formData,
+      headers
+    });
+
+    const data = await res.json();
+    if (!data.success && data.error) throw new Error(data.error);
+
+    setResult(data);
+    return data;
+
+  } catch (err) {
+    setError(err.message);
+    return null;
+
+  } finally {
+    setLoading(false);
+  }
+};
 
   const reset = () => {
     setResult(null);

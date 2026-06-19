@@ -4,6 +4,7 @@ import xlsx from 'xlsx';
 import fs from 'fs/promises';
 import { PDFDocument } from 'pdf-lib';
 import AdmZip from 'adm-zip';
+import path from 'path';
 
 const SUPPORTED_TYPES = {
   'image/jpeg': 'image',
@@ -29,21 +30,73 @@ export async function countPages(input, mimetype) {
   return 1;
 }
 
+
+
 async function countZipPages(input) {
-  const zip = Buffer.isBuffer(input) ? new AdmZip(input) : new AdmZip(input);
+  const zip = Buffer.isBuffer(input)
+    ? new AdmZip(input)
+    : new AdmZip(input);
+
   const entries = zip.getEntries();
+
   let totalPages = 0;
+
   for (const entry of entries) {
     if (entry.isDirectory) continue;
-    const ext = entry.entryName.toLowerCase().split('.').pop();
-    if (['jpg', 'jpeg', 'png'].includes(ext)) totalPages += 1;
-    else if (ext === 'pdf') {
-      const pdfBytes = entry.getData();
-      const pdfDoc = await PDFDocument.load(pdfBytes);
-      totalPages += pdfDoc.getPageCount();
+
+    const mimeType = getMimeTypeFromFilename(
+      entry.entryName
+    );
+
+    if (!mimeType) continue;
+
+    try {
+      const fileBuffer = entry.getData();
+
+      const pages = await countPages(
+        fileBuffer,
+        mimeType
+      );
+
+      totalPages += pages;
+    } catch (err) {
+      console.error(
+        'Failed counting pages for:',
+        entry.entryName
+      );
     }
   }
+
   return totalPages;
+}
+
+
+function getMimeTypeFromFilename(filename) {
+  const ext = path.extname(filename).toLowerCase();
+
+  switch (ext) {
+    case '.pdf':
+      return 'application/pdf';
+
+    case '.png':
+      return 'image/png';
+
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg';
+
+    case '.docx':
+      return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
+    case '.xls':
+      return 'application/vnd.ms-excel';
+
+    case '.xlsx':
+      return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+    default:
+      return null;
+  }
 }
 
 async function extractPdfText(pdfBytes) {
@@ -150,25 +203,79 @@ export async function processDocument(input, mimetype) {
     return { type: 'text', content: textContent };
   }
 
-  if (type === 'zip') return await processZip(input);
+  if (type === 'zip') {
+  return await processZip(input);
+}
   throw new Error(`Unhandled type: ${type}`);
 }
 
 async function processZip(input) {
-  const zip = Buffer.isBuffer(input) ? new AdmZip(input) : new AdmZip(input);
+  const zip = Buffer.isBuffer(input)
+    ? new AdmZip(input)
+    : new AdmZip(input);
+
   const entries = zip.getEntries();
+
+  if (entries.length > 500) {
+  throw new Error(
+    'ZIP contains too many files. Maximum 500.'
+  );
+}
+
   const documents = [];
+
+  let totalPages = 0;
+
   for (const entry of entries) {
     if (entry.isDirectory) continue;
-    const ext = entry.entryName.toLowerCase().split('.').pop();
-    if (['jpg', 'jpeg', 'png', 'pdf'].includes(ext)) {
+
+    const mimeType = getMimeTypeFromFilename(entry.entryName);
+
+    if (!mimeType) {
+      console.log('Skipping unsupported file:', entry.entryName);
+      continue;
+    }
+
+    try {
       const fileBuffer = entry.getData();
-      const mimeType = ext === 'pdf' ? 'application/pdf' : `image/${ext === 'jpg' ? 'jpeg' : ext}`;
-      const processed = await processDocument(fileBuffer, mimeType);
-      documents.push({ fileName: entry.entryName, ...processed, buffer: fileBuffer });
+
+      const pageCount = await countPages(
+        fileBuffer,
+        mimeType
+      );
+
+      totalPages += pageCount;
+
+      documents.push({
+        fileName: entry.entryName,
+        mimeType,
+        pageCount,
+        buffer: fileBuffer
+      });
+
+    } catch (err) {
+      console.error(
+        'Failed processing ZIP entry:',
+        entry.entryName,
+        err.message
+      );
     }
   }
-  return { type: 'batch', documents };
+
+  
+  if (totalPages > 5000) {
+  throw new Error(
+    'Batch exceeds maximum allowed pages.'
+  );
 }
+
+  return {
+    type: 'batch',
+    documents,
+    totalDocuments: documents.length,
+    totalPages
+  };
+}
+
 
 export { SUPPORTED_TYPES };

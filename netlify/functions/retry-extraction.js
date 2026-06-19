@@ -3,7 +3,7 @@ import { processDocument, countPages } from '../../services/documentProcessor.js
 import { extractWithAWS, isAwsConfigured } from '../../services/awsTextract.js';
 import { extractWithGPT, normalizeExtraction } from '../../services/gptExtractor.js';
 import { validateExtraction } from '../../services/validator.js';
-import { InvoiceSchema } from '../../schemas/invoice.schema.js';
+import { DocumentSchema } from '../../schemas/document.schema.js';
 import { calculateConfidence } from '../../services/confidenceEngine.js';
 import { mergeExtraction } from '../../services/mergeEngine.js';
 import { deductCredits, addCredits } from '../../services/creditEngine.js';
@@ -44,19 +44,26 @@ export const handler = async (event, context) => {
 
   const { documentId } = JSON.parse(event.body);
 
-    console.log('=== RETRY START ===');
+  console.log('=== RETRY START ===');
   console.log('documentId:', documentId);
   console.log('user.id:', user.id);
 
+  // FIX: Fetch document WITH existing extraction for version tracking
   const { data: doc, error: docError } = await supabase
     .from('documents')
-    .select('*')
+    .select(`*, extractions (id, version, extracted_data, validation_flags, confidence_scores)`)
     .eq('id', documentId)
     .eq('user_id', user.id)
     .single();
 
   console.log('DB query error:', docError);
-  console.log('DB query doc:', doc ? { id: doc.id, storage_path: doc.storage_path, file_name: doc.file_name, status: doc.status } : 'NOT FOUND');
+  console.log('DB query doc:', doc ? { 
+    id: doc.id, 
+    storage_path: doc.storage_path, 
+    file_name: doc.file_name, 
+    status: doc.status,
+    extractions_count: doc.extractions?.length || 0
+  } : 'NOT FOUND');
 
   if (docError || !doc) {
     console.log('Document not found, returning 404');
@@ -71,12 +78,12 @@ export const handler = async (event, context) => {
     console.log('storage_path is empty/null, trying to construct fallback path');
     const fallbackPath = `${user.id}/${documentId}/${doc.file_name}`;
     console.log('Fallback path:', fallbackPath);
-    
+
     // Check if file exists at fallback path
     const { data: listData, error: listError } = await supabase.storage.from('documents').list(`${user.id}/${documentId}`);
     console.log('Storage list result:', listData);
     console.log('Storage list error:', listError);
-    
+
     if (listData && listData.length > 0) {
       console.log('Found files at fallback location:', listData.map(f => f.name));
       doc.storage_path = fallbackPath;
@@ -88,31 +95,24 @@ export const handler = async (event, context) => {
 
   console.log('Final storage_path to use:', doc.storage_path);
 
-
   let creditsDeducted = 0;
 
   try {
-       console.log('Attempting download from:', doc.storage_path);
-    
+    console.log('Attempting download from:', doc.storage_path);
+
     const { data: fileData, error: downloadError } = await supabase.storage
       .from('documents')
       .download(doc.storage_path);
-    
+
     console.log('Download error:', downloadError);
     console.log('Download data exists?:', !!fileData);
-    
+
     if (downloadError) {
       console.error('Download FAILED:', downloadError.message, downloadError);
       throw new Error('Failed to download original file: ' + downloadError.message);
     }
-    
+
     console.log('Download SUCCESS');
-
-    
-
-    if (downloadError) {
-      throw new Error('Failed to download original file: ' + downloadError.message);
-    }
 
     const fileBuffer = Buffer.from(await fileData.arrayBuffer());
 
@@ -131,12 +131,14 @@ export const handler = async (event, context) => {
     }
     creditsDeducted = pageCount;
 
+    // Update document to processing status
     await supabase.from('documents').update({ 
       status: 'processing',
       page_count: pageCount,
-      credits_used: pageCount
+      credits_used: (doc.credits_used || 0) + pageCount
     }).eq('id', documentId);
 
+    // FIX: Use 'mixed' for auto-detection, not the stored document_type
     const processedDoc = await processDocument(fileBuffer, doc.file_type);
 
     let awsResult = null;
@@ -151,6 +153,10 @@ export const handler = async (event, context) => {
     const rawGpt = await extractWithGPT(processedDoc);
     const gptResult = normalizeExtraction(rawGpt);
 
+    console.log('Retry GPT Doc Type:', gptResult.document_type);
+    console.log('Retry GPT Vendor:', gptResult.vendor_name);
+    console.log('Retry GPT Category:', gptResult.category);
+
     const extractionData = mergeExtraction({
       aws: awsResult?.extracted ?? null,
       gpt: gptResult
@@ -160,46 +166,103 @@ export const handler = async (event, context) => {
       extractionData.line_items = [];
     }
 
-    const parsedSchema = InvoiceSchema.parse(extractionData);
+    const parsedSchema = DocumentSchema.parse(extractionData);
     const validation = validateExtraction(parsedSchema);
     const confidence = calculateConfidence(parsedSchema);
 
-    await supabase
-      .from('extractions')
-      .upsert({
-        document_id: documentId,
-        raw_data: extractionData,
-        extracted_data: parsedSchema,
-        validation_flags: validation.flags,
-        confidence_scores: confidence,
-        version: doc.extractions?.[0]?.version ? doc.extractions[0].version + 1 : 1
-      });
+    // FIX: Map pipeline status to DB-compatible status
+    const pipelineStatus = confidence.requiresReview || validation.requiresReview
+      ? 'REVIEW_REQUIRED'
+      : 'AUTO_APPROVED';
 
-    const finalStatus = validation.requiresReview ? 'review_required' : 'completed';
+    const dbStatus = pipelineStatus === 'REVIEW_REQUIRED'
+      ? 'review_required'
+      : 'completed';
 
-    if (finalStatus === 'completed') {
-      await supabase.storage.from('documents').remove([doc.storage_path]);
-      await supabase.from('documents').update({ storage_path: null }).eq('id', documentId);
+    // FIX: Get next version number from existing extraction
+    const existingExtraction = doc.extractions?.[0];
+    const nextVersion = existingExtraction?.version
+      ? existingExtraction.version + 1
+      : 1;
+
+    // FIX: Upsert extraction with proper conflict handling
+    // If an extraction exists, update it. Otherwise insert new.
+    if (existingExtraction?.id) {
+      // Update existing extraction
+      const { error: updateError } = await supabase
+        .from('extractions')
+        .update({
+          raw_data: extractionData,
+          extracted_data: parsedSchema,
+          validation_flags: validation,
+          confidence_scores: confidence,
+          version: nextVersion,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', existingExtraction.id);
+
+      if (updateError) {
+        console.error('Failed to update extraction:', updateError.message);
+        throw updateError;
+      }
+    } else {
+      // Insert new extraction
+      const { error: insertError } = await supabase
+        .from('extractions')
+        .insert({
+          document_id: documentId,
+          raw_data: extractionData,
+          extracted_data: parsedSchema,
+          validation_flags: validation,
+          confidence_scores: confidence,
+          version: nextVersion
+        });
+
+      if (insertError) {
+        console.error('Failed to insert extraction:', insertError.message);
+        throw insertError;
+      }
     }
 
+    // FIX: Update document with dbStatus and detected document_type
     await supabase.from('documents').update({
-      status: finalStatus,
+      status: dbStatus,
+      document_type: parsedSchema.document_type,  // Update with GPT-detected type
       processing_method: awsResult ? 'aws-textract' : 'gpt-only'
     }).eq('id', documentId);
+
+    // FIX: Storage cleanup uses dbStatus, not pipelineStatus
+    if (dbStatus === 'completed') {
+      console.log('Auto-approved, cleaning up storage...');
+      try {
+        await supabase.storage.from('documents').remove([doc.storage_path]);
+        await supabase.from('documents').update({ storage_path: null }).eq('id', documentId);
+      } catch (e) {
+        console.warn('Storage cleanup failed (non-critical):', e.message);
+      }
+    }
+
+    console.log('=== RETRY SUCCESS ===');
+    console.log('Doc Type:', parsedSchema.document_type, '| Status:', dbStatus, '| Confidence:', confidence.overall);
 
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
         success: true,
-        status: finalStatus,
+        status: pipelineStatus,  // Return pipeline status to frontend
+        dbStatus: dbStatus,        // Return DB status for reference
         extraction: parsedSchema,
+        validation,
+        confidence,
         creditsUsed: pageCount,
         creditsRemaining: creditResult.newBalance
       })
     };
 
   } catch (error) {
+    console.error('=== RETRY FAILED ===', error.message);
+
     if (creditsDeducted > 0) {
       await addCredits(user.id, creditsDeducted, 'retry_refund');
     }

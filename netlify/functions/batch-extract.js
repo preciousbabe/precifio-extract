@@ -1,146 +1,322 @@
-import { processDocument, countPages } from '../../services/documentProcessor.js';
-import { extractWithAWS, isAwsConfigured } from '../../services/awsTextract.js';
-import { extractWithGPT, normalizeExtraction } from '../../services/gptExtractor.js';
-import { validateExtraction } from '../../services/validator.js';
-import { InvoiceSchema } from '../../schemas/invoice.schema.js';
-import { calculateConfidence } from '../../services/confidenceEngine.js';
-import { mergeExtraction } from '../../services/mergeEngine.js';
-import { deductCredits, addCredits } from '../../services/creditEngine.js';
-import { v4 as uuidv4 } from 'uuid';
+// netlify/functions/batch-extract.js
+
 import Busboy from 'busboy';
 import { createClient } from '@supabase/supabase-js';
+import { v4 as uuidv4 } from 'uuid';
+
+import { processBatch, calculateZipCredits } from '../../services/batchProcessor.js';
+import { deductCredits, addCredits } from '../../services/creditEngine.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// ... parseMultipart, auth, rate limit same as extract.js ...
+// ============================================
+// HELPERS (defined before use)
+// ============================================
 
-export async function handler(event, context) {
+function parseMultipart(event) {
+  return new Promise((resolve, reject) => {
+    const busboy = Busboy({
+      headers: {
+        'content-type':
+          event.headers['content-type'] ||
+          event.headers['Content-Type']
+      }
+    });
+
+    const result = {
+      files: [],
+      fields: {}
+    };
+
+    busboy.on('file', (fieldname, file, info) => {
+      const { filename, mimeType } = info;
+
+      const chunks = [];
+
+      file.on('data', (data) => {
+        chunks.push(data);
+      });
+
+      file.on('end', () => {
+        result.files.push({
+          fieldname,
+          filename,
+          mimetype: mimeType,
+          buffer: Buffer.concat(chunks)
+        });
+      });
+    });
+
+    busboy.on('field', (fieldname, value) => {
+      result.fields[fieldname] = value;
+    });
+
+    busboy.on('close', () => resolve(result));
+    busboy.on('error', reject);
+
+    busboy.write(
+      Buffer.from(
+        event.body,
+        event.isBase64Encoded ? 'base64' : 'utf8'
+      )
+    );
+
+    busboy.end();
+  });
+}
+
+async function auditLog(userId, action, resourceType, resourceId, details = {}, reqHeaders = {}) {
+  try {
+    await supabase.from('audit_log').insert({
+      user_id: userId || null,
+      action,
+      resource_type: resourceType,
+      resource_id: resourceId,
+      user_agent: reqHeaders['user-agent'] || null,
+      details
+    });
+  } catch (err) {
+    console.error('Audit log failed:', err.message);
+  }
+}
+
+async function saveBatchDocument(userId, result, documentType) {
+  const docId = uuidv4();
+
+  // FIX: Use dbStatus from pipeline result, or map from status
+  const dbStatus = result.dbStatus || (
+    result.status === 'REVIEW_REQUIRED' ? 'review_required' :
+    result.status === 'AUTO_APPROVED' ? 'completed' :
+    'review_required'
+  );
+
+  // FIX: Use GPT-detected document type if available
+  const detectedDocType = result.extraction?.document_type || documentType;
+
+  const { error: docError } = await supabase.from('documents').insert({
+    id: docId,
+    user_id: userId,
+    file_name: result.fileName,
+    file_type: result.mimeType,
+    file_size: null,
+    document_type: detectedDocType,  // Use GPT-detected type
+    status: dbStatus,                // Use DB-compatible status
+    processing_method: result.processingMethod || 'gpt-only',
+    page_count: result.pageCount || 1,
+    credits_used: 1,
+    storage_path: null
+  });
+
+  if (docError) {
+    console.error('Failed to insert batch document:', docError.message);
+    return null;
+  }
+
+  // FIX: Save full extraction data including validation and confidence
+  const { error: extError } = await supabase.from('extractions').insert({
+    id: uuidv4(),
+    document_id: docId,
+    version: 1,
+    raw_data: result.rawExtraction || result.extraction || {},
+    extracted_data: result.extraction || {},
+    validation_flags: result.validation || { isValid: false, flags: [], requiresReview: true },
+    confidence_scores: result.confidence || { overall: 0, breakdown: {}, flags: { low_confidence_fields: [] }, status: 'LOW', requiresReview: true }
+  });
+
+  if (extError) {
+    console.error('Failed to insert batch extraction:', extError.message);
+  }
+
+  return docId;
+}
+
+async function authenticateUser(authHeader) {
+  if (!authHeader) return null;
+
+  const token = authHeader.replace('Bearer ', '');
+
+  const {
+    data: { user },
+    error
+  } = await supabase.auth.getUser(token);
+
+  if (error || !user) return null;
+
+  return user;
+}
+
+// ============================================
+// HANDLER
+// ============================================
+
+export async function handler(event) {
   const headers = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers':
+      'Content-Type, Authorization',
+    'Access-Control-Allow-Methods':
+      'POST, OPTIONS',
     'Content-Type': 'application/json'
   };
 
   if (event.httpMethod === 'OPTIONS') {
-    return { statusCode: 204, headers, body: '' };
+    return {
+      statusCode: 204,
+      headers,
+      body: ''
+    };
   }
 
   if (event.httpMethod !== 'POST') {
-    return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method not allowed' }) };
+    return {
+      statusCode: 405,
+      headers,
+      body: JSON.stringify({
+        error: 'Method not allowed'
+      })
+    };
   }
 
-  const user = await authenticateUser(event.headers.authorization || event.headers.Authorization);
-  const userId = user?.id;
-
-  // Parse multipart
-  let parsed;
-  try {
-    parsed = await parseMultipart(event);
-  } catch (err) {
-    return { statusCode: 400, headers, body: JSON.stringify({ error: 'Failed to parse upload' }) };
-  }
-
-  const file = parsed.files[0];
-  if (!file) {
-    return { statusCode: 400, headers, body: JSON.stringify({ error: 'No archive uploaded' }) };
-  }
-
-  const documentType = parsed.fields.documentType || 'invoice';
-  const jobName = parsed.fields.jobName || `Batch ${new Date().toLocaleDateString()}`;
-  const batchId = uuidv4();
+  // Declare variables here so catch block can access them
+  let user = null;
+  let creditEstimate = null;
+  let creditResult = null;
 
   try {
-    // Process ZIP to get batch
-    const processedZip = await processDocument(file.buffer, file.mimetype);
-    
-    if (processedZip.type !== 'batch') {
-      return { statusCode: 400, headers, body: JSON.stringify({ error: 'Expected ZIP archive' }) };
-    }
+    //-------------------------------------------------
+    // Auth
+    //-------------------------------------------------
 
-    const totalPages = processedZip.documents.reduce((sum, doc) => sum + (doc.pageCount || 1), 0);
-    const fileCount = processedZip.documents.length;
+    user = await authenticateUser(
+      event.headers.authorization ||
+        event.headers.Authorization
+    );
 
-    // Check credits
-    const creditResult = await deductCredits(userId, totalPages);
-    if (!creditResult.success) {
-      return { 
-        statusCode: 403, 
-        headers, 
+    if (!user) {
+      return {
+        statusCode: 401,
+        headers,
         body: JSON.stringify({
-          error: `Insufficient credits for batch. Need ${totalPages}, have ${creditResult.available}`,
-          code: 'INSUFFICIENT_CREDITS'
-        }) 
+          error: 'Unauthorized'
+        })
       };
     }
 
-    // Create batch job
-    await supabase.from('batch_jobs').insert({
-      id: batchId,
-      user_id: userId,
-      job_name: jobName,
-      source: 'upload',
-      total_documents: fileCount,
-      total_pages: totalPages,
-      status: 'processing',
-      credits_used: totalPages
+    //-------------------------------------------------
+    // Parse Upload
+    //-------------------------------------------------
+
+    const parsed = await parseMultipart(event);
+
+    const file = parsed.files[0];
+
+    if (!file) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({
+          error: 'No ZIP uploaded'
+        })
+      };
+    }
+
+    if (
+      file.mimetype !== 'application/zip' &&
+      file.mimetype !== 'application/x-zip-compressed'
+    ) {
+      return {
+        statusCode: 400,
+        headers,
+        body: JSON.stringify({
+          error: 'Only ZIP files allowed'
+        })
+      };
+    }
+
+    //-------------------------------------------------
+    // Credit Check
+    //-------------------------------------------------
+
+    creditEstimate = await calculateZipCredits(file.buffer);
+    creditResult = await deductCredits(user.id, creditEstimate.creditsRequired);
+
+    if (!creditResult.success) {
+      return {
+        statusCode: 403,
+        headers,
+        body: JSON.stringify({
+          error: `Insufficient credits. Need ${creditEstimate.creditsRequired}, have ${creditResult.available}`,
+          code: 'INSUFFICIENT_CREDITS',
+          required: creditEstimate.creditsRequired,
+          available: creditResult.available
+        })
+      };
+    }
+
+    //-------------------------------------------------
+    // Process Batch
+    //-------------------------------------------------
+
+    const result = await processBatch({
+      zipBuffer: file.buffer,
+      // FIX: Default to 'mixed' for auto-detection
+      documentType: parsed.fields.documentType || 'mixed'
     });
 
-    // Process each document
-    const results = [];
-    for (const doc of processedZip.documents) {
-      const docId = uuidv4();
-      const result = await processBatchDocument(docId, doc, userId, batchId, documentType);
-      results.push(result);
+    //-------------------------------------------------
+    // Save batch results to Supabase
+    //-------------------------------------------------
+
+    const documentType = parsed.fields.documentType || 'mixed';
+
+    for (const r of result.results) {
+      if (r.success) {
+        const savedDocId = await saveBatchDocument(user.id, r, documentType);
+        if (savedDocId) {
+          r.documentId = savedDocId;
+        }
+      }
     }
 
-    // Update batch status
-    const processedCount = results.filter(r => r.success).length;
-    const failedCount = results.filter(r => !r.success).length;
-    const reviewCount = results.filter(r => r.status === 'review_required').length;
+    await auditLog(user.id, 'batch_extraction_completed', 'batch', null, {
+      total_documents: result.totalDocuments,
+      processed: result.processedCount,
+      failed: result.failedCount,
+      review_required: result.reviewRequiredCount,
+      credits_used: creditEstimate.creditsRequired
+    }, event.headers);
 
-    await supabase.from('batch_jobs').update({
-      status: failedCount === 0 ? 'completed' : (processedCount > 0 ? 'partial' : 'failed'),
-      processed_count: processedCount,
-      failed_count: failedCount,
-      review_required_count: reviewCount,
-      completed_at: new Date().toISOString()
-    }).eq('id', batchId);
-
-    // Refund failed pages
-    if (failedCount > 0) {
-      const failedPages = results.filter(r => !r.success).reduce((sum, r) => sum + (r.pageCount || 1), 0);
-      await addCredits(userId, failedPages, 'batch_refund');
-    }
+    //-------------------------------------------------
+    // Response
+    //-------------------------------------------------
 
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
         success: true,
-        batchId,
-        totalPages,
-        creditsUsed: totalPages,
-        creditsRefunded: failedCount,
-        creditsRemaining: creditResult.newBalance - totalPages + failedCount,
-        summary: {
-          total: results.length,
-          processed: processedCount,
-          failed: failedCount,
-          reviewRequired: reviewCount
-        },
-        results
+        source: 'batch',
+        totalDocuments: result.totalDocuments,
+        totalPages: result.totalPages,
+        creditsUsed: creditEstimate.creditsRequired,
+        creditsRemaining: creditResult.newBalance,
+        processedCount: result.processedCount,
+        failedCount: result.failedCount,
+        reviewRequiredCount: result.reviewRequiredCount,
+        results: result.results
       })
     };
 
   } catch (error) {
-    await supabase.from('batch_jobs').update({
-      status: 'failed',
-      error_log: error.message
-    }).eq('id', batchId);
+    console.error('BATCH EXTRACT ERROR:', error);
+
+    // Refund credits on failure
+    if (creditEstimate && creditEstimate.creditsRequired && user && user.id) {
+      await addCredits(user.id, creditEstimate.creditsRequired, 'batch_refund');
+    }
 
     return {
       statusCode: 500,
@@ -148,85 +324,8 @@ export async function handler(event, context) {
       body: JSON.stringify({
         success: false,
         error: error.message,
-        batchId
+        creditsRefunded: creditEstimate?.creditsRequired || 0
       })
-    };
-  }
-}
-
-async function processBatchDocument(docId, doc, userId, batchId, documentType) {
-  try {
-    // Save document
-    await supabase.from('documents').insert({
-      id: docId,
-      user_id: userId,
-      batch_job_id: batchId,
-      file_name: doc.fileName,
-      file_type: doc.type === 'image' ? 'image/jpeg' : 'application/pdf',
-      status: 'processing',
-      page_count: doc.pageCount || 1
-    });
-
-    // Extract
-    let awsResult = null;
-    if (isAwsConfigured() && doc.buffer) {
-      try {
-        awsResult = await extractWithAWS(doc.buffer, documentType);
-      } catch (e) {
-        console.warn('AWS batch failed:', e.message);
-      }
-    }
-
-    const rawGpt = await extractWithGPT(doc);
-    const gptResult = normalizeExtraction(rawGpt);
-
-    const extractionData = mergeExtraction({
-      aws: awsResult?.extracted ?? null,
-      gpt: gptResult
-    });
-
-    if (!Array.isArray(extractionData.line_items)) {
-      extractionData.line_items = [];
-    }
-
-    const parsed = InvoiceSchema.parse(extractionData);
-    const validation = validateExtraction(parsed);
-    const confidence = calculateConfidence(parsed);
-
-    // Save extraction
-    await supabase.from('extractions').insert({
-      document_id: docId,
-      raw_data: extractionData,
-      extracted_data: parsed,
-      validation_flags: validation.flags,
-      confidence_scores: confidence,
-      version: 1
-    });
-
-    const status = validation.requiresReview ? 'review_required' : 'completed';
-    
-    await supabase.from('documents').update({
-      status,
-      processing_method: awsResult ? 'aws-textract' : 'gpt-only'
-    }).eq('id', docId);
-
-    return {
-      success: true,
-      documentId: docId,
-      fileName: doc.fileName,
-      status,
-      confidence: confidence.overall,
-      pageCount: doc.pageCount || 1
-    };
-
-  } catch (error) {
-    await supabase.from('documents').update({ status: 'failed' }).eq('id', docId);
-    return {
-      success: false,
-      documentId: docId,
-      fileName: doc.fileName,
-      error: error.message,
-      pageCount: doc.pageCount || 1
     };
   }
 }

@@ -291,21 +291,161 @@ function App() {
           )}
 
           {result && (
-            <div>
-              <div style={{ marginBottom: '16px', display: 'flex', gap: '12px', alignItems: 'center' }}>
-                <button onClick={handleNewUpload} style={{ padding: '10px 20px', background: '#1e40af', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>
-                  Upload Another
-                </button>
-                {result.creditsUsed !== undefined && (
-                  <span style={{ fontSize: '13px', color: '#6b7280' }}>
-                    Used {result.creditsUsed} credit{result.creditsUsed !== 1 ? 's' : ''} 
-                    {result.creditsRemaining !== undefined && ` • ${result.creditsRemaining} remaining`}
+  <div>
+    <div style={{ marginBottom: '16px', display: 'flex', gap: '12px', alignItems: 'center' }}>
+      <button onClick={handleNewUpload} style={{ padding: '10px 20px', background: '#1e40af', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>
+        Upload Another
+      </button>
+      {result.creditsUsed !== undefined && (
+        <span style={{ fontSize: '13px', color: '#6b7280' }}>
+          Used {result.creditsUsed} credit{result.creditsUsed !== 1 ? 's' : ''} 
+          {result.creditsRemaining !== undefined && ` • ${result.creditsRemaining} remaining`}
+        </span>
+      )}
+    </div>
+
+    {/* BATCH RESULTS */}
+    {result.source === 'batch' && (
+      <div>
+        {/* Batch Summary Card */}
+        <div style={{ 
+          padding: '16px', 
+          background: '#f0f9ff', 
+          borderRadius: '8px', 
+          marginBottom: '24px',
+          border: '1px solid #bae6fd'
+        }}>
+          <h3 style={{ margin: '0 0 12px 0', color: '#0369a1' }}>
+            📦 Batch Processing Complete
+          </h3>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '12px' }}>
+            <div style={{ textAlign: 'center', padding: '8px', background: '#fff', borderRadius: '6px' }}>
+              <div style={{ fontSize: '24px', fontWeight: 700, color: '#0284c7' }}>{result.totalDocuments}</div>
+              <div style={{ fontSize: '12px', color: '#64748b' }}>Total Files</div>
+            </div>
+            <div style={{ textAlign: 'center', padding: '8px', background: '#fff', borderRadius: '6px' }}>
+              <div style={{ fontSize: '24px', fontWeight: 700, color: '#16a34a' }}>{result.processedCount}</div>
+              <div style={{ fontSize: '12px', color: '#64748b' }}>Processed</div>
+            </div>
+            <div style={{ textAlign: 'center', padding: '8px', background: '#fff', borderRadius: '6px' }}>
+              <div style={{ fontSize: '24px', fontWeight: 700, color: '#dc2626' }}>{result.failedCount}</div>
+              <div style={{ fontSize: '12px', color: '#64748b' }}>Failed</div>
+            </div>
+            <div style={{ textAlign: 'center', padding: '8px', background: '#fff', borderRadius: '6px' }}>
+              <div style={{ fontSize: '24px', fontWeight: 700, color: '#f59e0b' }}>{result.reviewRequiredCount}</div>
+              <div style={{ fontSize: '12px', color: '#64748b' }}>Need Review</div>
+            </div>
+            {result.totalPages !== undefined && (
+              <div style={{ textAlign: 'center', padding: '8px', background: '#fff', borderRadius: '6px' }}>
+                <div style={{ fontSize: '24px', fontWeight: 700, color: '#7c3aed' }}>{result.totalPages}</div>
+                <div style={{ fontSize: '12px', color: '#64748b' }}>Total Pages</div>
+              </div>
+            )}
+            {result.creditsUsed !== undefined && (
+              <div style={{ textAlign: 'center', padding: '8px', background: '#fff', borderRadius: '6px' }}>
+                <div style={{ fontSize: '24px', fontWeight: 700, color: '#92400e' }}>{result.creditsUsed}</div>
+                <div style={{ fontSize: '12px', color: '#64748b' }}>Credits Used</div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Individual Results */}
+        {result.results?.map((r, i) => (
+          <div key={i} style={{ 
+            marginBottom: '32px', 
+            border: '1px solid #e5e7eb', 
+            borderRadius: '8px', 
+            overflow: 'hidden'
+          }}>
+            {/* File Header */}
+            <div style={{ 
+              padding: '12px 16px', 
+              background: r.success ? '#f8fafc' : '#fef2f2',
+              borderBottom: '1px solid #e5e7eb',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '20px' }}>
+                  {r.mimeType?.includes('pdf') ? '📄' : 
+                   r.mimeType?.includes('image') ? '🖼️' : 
+                   r.mimeType?.includes('sheet') ? '📊' : 
+                   r.mimeType?.includes('word') ? '📝' : '📄'}
+                </span>
+                <div>
+                  <div style={{ fontWeight: 600, color: '#1f2937', fontSize: '14px' }}>
+                    {r.fileName}
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#6b7280' }}>
+                    {r.pageCount} page{r.pageCount !== 1 ? 's' : ''} • {r.mimeType?.split('/')[1]?.toUpperCase()}
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {r.success && r.status === 'REVIEW_REQUIRED' && (
+                  <span style={{ 
+                    padding: '4px 10px', 
+                    background: '#fef3c7', 
+                    color: '#92400e', 
+                    borderRadius: '12px', 
+                    fontSize: '12px', 
+                    fontWeight: 600 
+                  }}>
+                    ⚠️ Review
+                  </span>
+                )}
+                {r.success && r.status === 'AUTO_APPROVED' && (
+                  <span style={{ 
+                    padding: '4px 10px', 
+                    background: '#dcfce7', 
+                    color: '#166534', 
+                    borderRadius: '12px', 
+                    fontSize: '12px', 
+                    fontWeight: 600 
+                  }}>
+                    ✅ Approved
+                  </span>
+                )}
+                {!r.success && (
+                  <span style={{ 
+                    padding: '4px 10px', 
+                    background: '#fee2e2', 
+                    color: '#991b1b', 
+                    borderRadius: '12px', 
+                    fontSize: '12px', 
+                    fontWeight: 600 
+                  }}>
+                    ❌ Failed
                   </span>
                 )}
               </div>
-              <ExtractionResult data={result} />
             </div>
-          )}
+
+            {/* Extraction Content */}
+            <div style={{ padding: '16px' }}>
+              {r.success ? (
+                <ExtractionResult data={r} />
+              ) : (
+                <div style={{ color: '#ef4444', padding: '16px', textAlign: 'center' }}>
+                  <p style={{ margin: '0 0 8px 0', fontWeight: 600 }}>Processing Failed</p>
+                  <p style={{ margin: 0, fontSize: '14px', color: '#6b7280' }}>{r.error}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    )}
+
+    {/* SINGLE RESULT */}
+    {result.source !== 'batch' && (
+      <ExtractionResult data={result} />
+    )}
+  </div>
+)}
+
 
           <div style={{ marginTop: '32px', textAlign: 'center' }}>
             <a href="#documents" style={{ color: '#1e40af', textDecoration: 'none', fontWeight: 500 }}>
