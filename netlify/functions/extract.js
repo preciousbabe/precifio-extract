@@ -181,12 +181,23 @@ export async function handler(event, context) {
     await auditLog(userId, 'document_uploaded', 'document', docId, { file_name: file.filename, page_count: pageCount, credits_used: pageCount }, event.headers);
 
     console.log('=== EXTRACTION PIPELINE START ===');
+    
 
-    const extractionResult = await runExtractionPipeline({
-      fileBuffer: file.buffer,
-      mimeType: file.mimetype,
-      documentType  // 'mixed' lets GPT auto-detect
-    });
+const pipelineStart = Date.now();
+
+const extractionResult = await runExtractionPipeline({
+  fileBuffer: file.buffer,
+  mimeType: file.mimetype,
+  documentType,
+  fileName: file.filename
+});
+
+console.log(
+  'TOTAL PIPELINE TIME:',
+  ((Date.now() - pipelineStart) / 1000).toFixed(2),
+  'seconds'
+);
+
 
     const parsedSchema = extractionResult.extraction;
     const validation = extractionResult.validation;

@@ -96,11 +96,13 @@ async function processSingleDocument({
   mimeType: document.mimeType
   });
 
- const extraction = await runExtractionPipeline({
+
+const extraction = await runExtractionPipeline({
   fileBuffer: document.buffer,
   mimeType: document.mimeType,
-  documentType
- });
+  documentType,
+  fileName: document.fileName 
+});
 
 
 return {

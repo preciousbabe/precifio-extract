@@ -155,13 +155,17 @@ export async function processDocument(input, mimetype) {
   if (type === 'image') {
     const imageBuffer = isBuffer ? input : await fs.readFile(input);
     const metadata = await sharp(imageBuffer).metadata();
-    const MAX_SIZE = 2048;
+          const MAX_SIZE = 1024; // Reduced from 1200 for faster GPT processing
     const needsResize = metadata.width > MAX_SIZE || metadata.height > MAX_SIZE;
     let processed = sharp(imageBuffer);
     if (needsResize) {
       processed = processed.resize(MAX_SIZE, MAX_SIZE, { fit: 'inside', withoutEnlargement: true });
     }
-    const optimized = await processed.jpeg({ quality: 95, progressive: true }).toBuffer();
+    // Aggressive quality reduction for GPT-only mode
+    const quality = imageBuffer.length > 1 * 1024 * 1024 ? 70 : 80;
+    const optimized = await processed.jpeg({ quality, progressive: true }).toBuffer();
+    console.log('Image optimized:', metadata.width, 'x', metadata.height, '→ max', MAX_SIZE, 'quality:', quality, 'output:', Math.round(optimized.length / 1024), 'KB');
+   
     return { type: 'image', content: optimized.toString('base64') };
   }
 
