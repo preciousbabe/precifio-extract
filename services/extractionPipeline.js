@@ -3,10 +3,12 @@ import { extractWithAWS, isAwsConfigured } from './awsTextract.js';
 import { extractWithGPT, normalizeExtraction } from './gptExtractor.js';
 import { validateExtraction } from './validator.js';
 import { FlexibleDocumentSchema } from '../schemas/document.schema.js';
-import { calculateConfidence } from './confidenceEngine.js';
 import { mergeExtraction } from './mergeEngine.js';
 import { mapToLegacyFormat } from '../schemas/schemaMapper.js';
 import { isLegacyType } from '../schemas/documentRegistry.js';
+import { preprocessDocument } from './documentPreprocessor.js';
+import { postProcessExtraction } from './documentPostprocessor.js';
+import { sanitizeForZod, sanitizeSections, sanitizeParty } from './dataSanitizer.js';
 
 export async function runExtractionPipeline({
   fileBuffer,
@@ -16,6 +18,8 @@ export async function runExtractionPipeline({
   fileName = ''
 }) {
   mimetype = mimetype || mimeType;
+  const pipelineStart = performance.now();
+  
   console.log('====================================');
   console.log('EXTRACTION PIPELINE START');
   console.log('Document Type:', documentType);
@@ -23,58 +27,34 @@ export async function runExtractionPipeline({
   console.log('File Name:', fileName);
   console.log('====================================');
 
-  // STEP 1: PREPROCESS DOCUMENT
-const processStart = Date.now();
+  // STEP 1: processDocument
+  const t1 = performance.now();
+  const processedDoc = await processDocument(fileBuffer, mimetype);
+  console.log('[TIMER] processDocument:', ((performance.now() - t1) / 1000).toFixed(2), 's | type:', processedDoc.type);
 
-const processedDoc = await processDocument(
-  fileBuffer,
-  mimetype
-);
-
-console.log(
-  'PROCESS DOC TIME:',
-  ((Date.now() - processStart) / 1000).toFixed(2),
-  'seconds'
-);
-
-if (processedDoc.type === 'batch') {
-  throw new Error('ZIP files must be processed through batch processor');
-}
-
-  // STEP 1b: CHECK FOR PDF EXTRACTION FAILURE
-  if (processedDoc.type === 'text' && 
-      processedDoc.content &&
-      (processedDoc.content.startsWith('[PDF Document') || processedDoc.content.startsWith('[UNREADABLE PDF')) &&
-      processedDoc.content.length < 100) {
-    
-    console.log('PDF text extraction failed — document may be image-based, scanned, or corrupted');
-    
-    const failedExtraction = buildFailedExtraction('Text extraction failed — document may be image-based, scanned, or corrupted');
-    
-    const validation = validateExtraction(failedExtraction);
-    const confidence = calculateConfidence(failedExtraction);
-
-    console.log('Pipeline Status: REVIEW_REQUIRED');
-    console.log('DB Status: review_required');
-    console.log('Review Reason: PDF text extraction failed');
-
-    return buildPipelineResult(failedExtraction, validation, confidence, null, 'extraction-failed', processedDoc);
+  if (processedDoc.type === 'batch') {
+    throw new Error('ZIP files must be processed through batch processor');
   }
 
-   // STEP 2 & 3: AWS (optional) + GPT (primary)
+  // STEP 2: preprocessDocument
+  const t2 = performance.now();
+  const preprocessed = await preprocessDocument(fileBuffer, mimetype, fileName, processedDoc.text || '');
+  console.log('[TIMER] preprocessDocument:', ((performance.now() - t2) / 1000).toFixed(2), 's | detected:', preprocessed.detectedType);
+
+  const effectiveType = (documentType === 'mixed' || documentType === 'unknown') 
+    ? preprocessed.detectedType 
+    : documentType;
+
+  // STEP 3: AWS (optional)
+  const t3 = performance.now();
   let awsResult = null;
-  
-  // Only attempt AWS if explicitly enabled and configured
   const useAws = isAwsConfigured() && process.env.ENABLE_AWS === 'true';
-  
   if (useAws) {
     try {
       console.log('AWS Textract Processing...');
       awsResult = await Promise.race([
-        extractWithAWS(fileBuffer, documentType),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('AWS_TIMEOUT')), 5000)
-        )
+        extractWithAWS(fileBuffer, effectiveType),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('AWS_TIMEOUT')), 5000))
       ]);
       console.log('AWS Success:', !!awsResult?.extracted);
     } catch (err) {
@@ -84,196 +64,173 @@ if (processedDoc.type === 'batch') {
   } else {
     console.log('AWS Textract: Skipped (GPT-only mode)');
   }
+  console.log('[TIMER] AWS step:', ((performance.now() - t3) / 1000).toFixed(2), 's');
 
- // STEP 3: GPT EXTRACTION (always runs, never blocked by AWS)
-console.log('GPT Extraction Starting...');
+  // STEP 4: GPT EXTRACTION
+  console.log('====================================');
+  console.log('GPT EXTRACTION START');
+  const gptStart = performance.now();
 
-const gptStart = Date.now();
+  const rawGpt = await extractWithGPT(processedDoc, fileName, effectiveType);
 
-const rawGpt = await extractWithGPT(
-  processedDoc,
-  fileName
-);
+  const gptElapsed = (performance.now() - gptStart) / 1000;
+  console.log('[TIMER] extractWithGPT TOTAL:', gptElapsed.toFixed(2), 'seconds');
+  console.log('====================================');
 
-console.log(
-  'GPT TIME:',
-  ((Date.now() - gptStart) / 1000).toFixed(2),
-  'seconds'
-);
+  // STEP 5: normalizeExtraction
+  const t5a = performance.now();
+  const normalizedGpt = normalizeExtraction(rawGpt);
+  console.log('[TIMER] normalizeExtraction:', ((performance.now() - t5a) / 1000).toFixed(3), 's');
 
-const gptResult = normalizeExtraction(rawGpt);
-  
-  console.log('GPT Doc Type:', gptResult.document_type);
-  console.log('GPT Category:', gptResult.document_category);
-  console.log('GPT Issuer:', gptResult.issuer?.name);
-  console.log('GPT Total:', gptResult.total_amount);
-  console.log('GPT Sections:', gptResult.sections?.map(s => s.section_type).join(', '));
+  // STEP 6: postProcessExtraction
+  const t5b = performance.now();
+  const postProcessed = postProcessExtraction(normalizedGpt, effectiveType);
+  console.log('[TIMER] postProcessExtraction:', ((performance.now() - t5b) / 1000).toFixed(3), 's');
+  console.log('Post-processed type:', postProcessed.document_type);
+  console.log('Post-processed category:', postProcessed.document_category);
 
-  // STEP 4: MERGE RESULTS
+  // STEP 7: mergeExtraction
+  const t6 = performance.now();
   const extractionData = mergeExtraction({
-    aws: awsResult?.extracted ?? null,
-    gpt: gptResult
+    aws: awsResult?.extracted || null,
+    gpt: postProcessed || buildFailedExtraction('GPT returned no extraction')
   });
+  console.log('[TIMER] mergeExtraction:', ((performance.now() - t6) / 1000).toFixed(3), 's');
 
-  // STEP 5: VALIDATE SCHEMA
-  console.log('BEFORE SCHEMA:', JSON.stringify(extractionData, null, 2));
-  const parsedSchema = FlexibleDocumentSchema.parse(extractionData);
-  console.log('AFTER SCHEMA:', JSON.stringify(parsedSchema, null, 2));
+  // STEP 8: sanitizeForZod
+  console.log('====================================');
+  console.log('UNIVERSAL SANITIZATION START');
+  const t7 = performance.now();
+  
+  const sanitizedData = sanitizeForZod(extractionData, effectiveType);
+  console.log('[TIMER] sanitizeForZod:', ((performance.now() - t7) / 1000).toFixed(3), 's');
 
-  // STEP 6: VALIDATION FLAGS
-  const validation = validateExtraction(parsedSchema);
+  const t7b = performance.now();
+  if (Array.isArray(sanitizedData.sections)) {
+    sanitizedData.sections = sanitizeSections(sanitizedData.sections, effectiveType);
+  }
+  console.log('[TIMER] sanitizeSections:', ((performance.now() - t7b) / 1000).toFixed(3), 's');
 
-     // STEP 7: CONFIDENCE SCORE
-  const confidence = calculateConfidence(parsedSchema);
+  const t7c = performance.now();
+  sanitizedData.issuer = sanitizeParty(sanitizedData.issuer);
+  sanitizedData.recipient = sanitizeParty(sanitizedData.recipient);
+  if (sanitizedData.buyer) sanitizedData.buyer = sanitizeParty(sanitizedData.buyer);
+  if (sanitizedData.seller) sanitizedData.seller = sanitizeParty(sanitizedData.seller);
+  if (sanitizedData.customer) sanitizedData.customer = sanitizeParty(sanitizedData.customer);
+  if (sanitizedData.supplier) sanitizedData.supplier = sanitizeParty(sanitizedData.supplier);
+  console.log('[TIMER] sanitizeParty (all):', ((performance.now() - t7c) / 1000).toFixed(3), 's');
 
-  // SAFETY: Warn if confidence seems misaligned with actual data
-  if (confidence.overall === 0 && parsedSchema.issuer?.name) {
-    console.warn('WARNING: Confidence is 0 but document has issuer name — check fieldWeights in documentRegistry.js for type:', parsedSchema.document_type);
+  console.log('Sanitized sections:', sanitizedData.sections?.length || 0);
+  console.log('Sanitized fields:', Object.keys(sanitizedData).length);
+  console.log('UNIVERSAL SANITIZATION END');
+  console.log('====================================');
+
+  // STEP 9: Schema validation
+  console.log('Schema validation starting...');
+  const t8 = performance.now();
+  let parsedSchema;
+  try {
+    parsedSchema = FlexibleDocumentSchema.parse(sanitizedData);
+    console.log('[TIMER] Schema parse (pass):', ((performance.now() - t8) / 1000).toFixed(3), 's');
+    console.log('Schema validation: PASSED');
+  } catch (err) {
+    console.error('Schema validation failed');
+    console.error('Zod errors:', err.issues?.map(i => `${i.path.join('.')}: ${i.message}`).join('; '));
+    const t8fix = performance.now();
+    const fixed = applySchemaDefaults(sanitizedData, err.issues);
+    try {
+      parsedSchema = FlexibleDocumentSchema.parse(fixed);
+      console.log('[TIMER] Schema parse (fixed):', ((performance.now() - t8fix) / 1000).toFixed(3), 's');
+      console.log('Schema validation: FIXED AND PASSED');
+    } catch (err2) {
+      console.error('Schema validation failed again, using fallback');
+      parsedSchema = FlexibleDocumentSchema.parse(buildFailedExtraction(err2.message));
+      console.log('[TIMER] Schema parse (fallback):', ((performance.now() - t8fix) / 1000).toFixed(3), 's');
+    }
   }
 
-  // STEP 8: FINAL STATUS
-  const needsReview = confidence.requiresReview || validation.requiresReview;
+  // STEP 10: validation flags
+  const t9 = performance.now();
+  const validation = validateExtraction(parsedSchema);
+  console.log('[TIMER] validateExtraction:', ((performance.now() - t9) / 1000).toFixed(3), 's');
+
+  const confidence = postProcessed.confidence_scores;
+
+  // STEP 11: final assembly
+  const t10 = performance.now();
+  const needsReview = confidence.requiresReview;
   const pipelineStatus = needsReview ? 'REVIEW_REQUIRED' : 'AUTO_APPROVED';
   const dbStatus = needsReview ? 'review_required' : 'completed';
+  const finalExtraction = { ...parsedSchema, confidence_scores: confidence };
+  console.log('[TIMER] final assembly:', ((performance.now() - t10) / 1000).toFixed(3), 's');
 
-  // === FIX: Inject confidence into schema, stripping old defaults ===
-  const { confidence_scores: _, ...schemaWithoutConfidence } = parsedSchema;
-  
-  const finalExtraction = {
-    ...schemaWithoutConfidence,
-    confidence_scores: {
-      overall: confidence.overall,
-      completeness: confidence.completeness,
-      breakdown: confidence.breakdown,
-      status: confidence.status,
-      requiresReview: confidence.requiresReview,
-      reviewReason: confidence.reviewReason,
-      extractedFieldCount: confidence.extractedFieldCount,
-      totalPossibleFields: confidence.totalPossibleFields,
-      flags: confidence.flags
-    }
-  };
-
-  
-  console.log('Pipeline Status:', pipelineStatus);
-  console.log('DB Status:', dbStatus);
-  console.log('Confidence:', confidence.overall, '| Status:', confidence.status);
-  if (confidence.reviewReason) console.log('Review Reason:', confidence.reviewReason);
+  const totalTime = (performance.now() - pipelineStart) / 1000;
+  console.log('====================================');
+  console.log('PIPELINE COMPLETE');
+  console.log('Total pipeline time:', totalTime.toFixed(2), 's');
+  console.log('Status:', pipelineStatus);
+  console.log('Processing:', awsResult ? 'aws-textract' : 'gpt-only');
+  console.log('====================================');
 
   return buildPipelineResult(finalExtraction, validation, confidence, awsResult, awsResult ? 'aws-textract' : 'gpt-only', processedDoc, pipelineStatus, dbStatus);
+}
+
+
+// Generic fallback — applies defaults based on Zod schema shape, no hardcoding
+function applySchemaDefaults(data, issues) {
+  const fixed = JSON.parse(JSON.stringify(data));
+  
+  for (const issue of issues) {
+    const path = issue.path;
+    if (path.length === 0) continue;
+    
+    let current = fixed;
+    for (let i = 0; i < path.length - 1; i++) {
+      if (current === null || current === undefined) break;
+      current = current[path[i]];
+    }
+    const field = path[path.length - 1];
+    
+    if (issue.code === 'invalid_type') {
+      if (issue.expected === 'object') {
+        current[field] = {};
+      } else if (issue.expected === 'array') {
+        current[field] = [];
+      } else if (issue.expected === 'string') {
+        current[field] = '';
+      } else if (issue.expected === 'number') {
+        current[field] = null;
+      }
+    }
+  }
+  
+  return fixed;
 }
 
 function buildFailedExtraction(notes) {
   return {
     document_type: 'unknown',
     document_category: 'other',
-    issuer: {},
-    recipient: {},
-    issue_date: null,
-    effective_date: null,
-    expiry_date: null,
-    total_amount: null,
-    currency: 'USD',
-    sections: [],
-    specific_fields: {},
-    vendor_name: null,
-    vendor_address: null,
-    vendor_tax_id: null,
-    vendor_email: null,
-    vendor_phone: null,
-    vendor_website: null,
-    vendor_registration_number: null,
-    date: null,
-    notes,
-    document_source: null,
-    document_id: null,
-    document_title: null,
-    created_date: null,
-    updated_date: null,
-    country: null,
-    state: null,
-    language: null,
-    invoice_number: null,
-    po_number: null,
-    reference_number: null,
-    buyer_name: null,
-    buyer_address: null,
-    buyer_tax_id: null,
-    buyer_email: null,
-    invoice_date: null,
-    due_date: null,
-    payment_date: null,
-    line_items: [],
-    subtotal: null,
-    discount_amount: 0,
-    tax_amount: 0,
-    tax_details: [],
-    shipping_amount: 0,
-    amount_due: null,
-    amount_paid: 0,
-    payment_status: null,
-    payment_method: null,
-    payment_terms: null,
-    purchase_order_reference: null,
-    service_period: { from: null, to: null },
-    late_fee: null,
-    invoice_status: null,
-    receipt_number: null,
-    items: [],
-    change_given: 0,
-    cashier_name: null,
-    store_location: null,
-    terminal_id: null,
-    account_number: null,
-    statement_period: { from: null, to: null },
-    opening_balance: null,
-    closing_balance: null,
-    transactions: [],
-    account_name: null,
-    bank_name: null,
-    branch_name: null,
-    routing_number: null,
-    swift_code: null,
-    iban: null,
-    account_type: null,
-    bill_number: null,
-    usage_amount: null,
-    usage_period: { from: null, to: null },
-    previous_balance: 0,
-    current_charges: 0,
-    meter_number: null,
-    customer_number: null,
-    tariff_plan: null,
-    units_consumed: null,
-    order_date: null,
-    delivery_date: null,
-    ship_to: null,
-    buyer_company: null,
-    supplier_name: null,
-    supplier_contact: null,
-    expected_total: null,
-    contract_number: null,
-    contract_type: null,
-    counterparty: null,
-    expiration_date: null,
-    renewal_date: null,
-    contract_value: null,
-    category: 'Uncategorized',
+    notes: typeof notes === 'string' ? notes : JSON.stringify(notes),
     confidence_scores: {
       overall: 0,
-      breakdown: {},
+      status: 'LOW',
+      requiresReview: true,
+      reviewReason: 'Extraction failed',
       flags: {
         low_confidence_fields: [],
         missing_required_fields: [],
         invalid_dates: [],
         math_issue: false,
         balance_mismatch: false
-      },
-      status: 'LOW',
-      requiresReview: true
+      }
     },
-    _schema_version: 'v7-flexible',
-    _source: { aws: false, gpt: false }
+    _schema_version: 'v8-flexible',
+    _source: { aws: false, gpt: false },
+    issuer: { name: null, address: null, tax_id: null, email: null, phone: null, website: null, registration_number: null, id_number: null },
+    recipient: { name: null, address: null, tax_id: null, email: null, id_number: null, date_of_birth: null },
+    sections: [],
+    specific_fields: {}
   };
 }
 

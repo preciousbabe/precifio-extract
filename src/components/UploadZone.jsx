@@ -81,7 +81,9 @@ export function UploadZone({ onUpload }) {
       'application/vnd.ms-excel': ['.xls'],
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
       'application/zip': ['.zip'],
-      'application/x-zip-compressed': ['.zip']
+      'application/x-zip-compressed': ['.zip'],
+      'text/html': ['.html', '.htm'],
+      'text/plain': ['.txt']
     },
     maxFiles: 1
   });
@@ -162,7 +164,7 @@ export function UploadZone({ onUpload }) {
           {isDragActive ? 'Drop the document here' : 'Drag & drop your document, or click to browse'}
         </p>
         <p style={{ fontSize: '13px', color: '#6b7280', marginTop: '8px' }}>
-          PDF, JPG, PNG, DOCX, XLSX up to 10MB
+          PDF, JPG, PNG, DOCX, XLS, XLSX, HTML, TXT, ZIP up to 10MB
         </p>
       </div>
     </div>

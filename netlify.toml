@@ -6,17 +6,17 @@
   NODE_VERSION = "20"
 
 [dev]
-command = "vite"
-targetPort = 5173
-port = 8888
-autoLaunch = true
+  command = "vite"
+  targetPort = 5173
+  port = 8888
+  autoLaunch = true
 
 [functions]
   directory = "netlify/functions"
   node_bundler = "esbuild"
 
 [functions.extract]
-  included_files = ["services/**", "schemas/**", "config/**", "middleware/**"]
+  included_files = ["services/**", "schemas/**", "config/**", "middleware/**", "node_modules/pdfjs-dist/legacy/build/pdf.js"]
 
 [functions.export]
   included_files = ["services/**", "schemas/**", "config/**", "middleware/**"]

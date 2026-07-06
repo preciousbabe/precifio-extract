@@ -13,7 +13,7 @@ const supabase = createClient(
 );
 
 // ============================================
-// HELPERS (defined before use)
+// HELPERS
 // ============================================
 
 function parseMultipart(event) {
@@ -26,20 +26,12 @@ function parseMultipart(event) {
       }
     });
 
-    const result = {
-      files: [],
-      fields: {}
-    };
+    const result = { files: [], fields: {} };
 
     busboy.on('file', (fieldname, file, info) => {
       const { filename, mimeType } = info;
-
       const chunks = [];
-
-      file.on('data', (data) => {
-        chunks.push(data);
-      });
-
+      file.on('data', (data) => chunks.push(data));
       file.on('end', () => {
         result.files.push({
           fieldname,
@@ -63,124 +55,122 @@ function parseMultipart(event) {
         event.isBase64Encoded ? 'base64' : 'utf8'
       )
     );
-
     busboy.end();
   });
 }
 
-async function auditLog(userId, action, resourceType, resourceId, details = {}, reqHeaders = {}) {
-  try {
-    await supabase.from('audit_log').insert({
-      user_id: userId || null,
-      action,
-      resource_type: resourceType,
-      resource_id: resourceId,
-      user_agent: reqHeaders['user-agent'] || null,
-      details
-    });
-  } catch (err) {
-    console.error('Audit log failed:', err.message);
-  }
-}
-
-async function saveBatchDocument(userId, result, documentType) {
-  const docId = uuidv4();
-
-  // FIX: Use dbStatus from pipeline result, or map from status
-  const dbStatus = result.dbStatus || (
-    result.status === 'REVIEW_REQUIRED' ? 'review_required' :
-    result.status === 'AUTO_APPROVED' ? 'completed' :
-    'review_required'
-  );
-
-  // FIX: Use GPT-detected document type if available
-  const detectedDocType = result.extraction?.document_type || documentType;
-
-  const { error: docError } = await supabase.from('documents').insert({
-    id: docId,
-    user_id: userId,
-    file_name: result.fileName,
-    file_type: result.mimeType,
-    file_size: null,
-    document_type: detectedDocType,  // Use GPT-detected type
-    status: dbStatus,                // Use DB-compatible status
-    processing_method: result.processingMethod || 'gpt-only',
-    page_count: result.pageCount || 1,
-    credits_used: 1,
-    storage_path: null
-  });
-
-  if (docError) {
-    console.error('Failed to insert batch document:', docError.message);
-    return null;
-  }
-
-  // FIX: Save full extraction data including validation and confidence
-  const { error: extError } = await supabase.from('extractions').insert({
-    id: uuidv4(),
-    document_id: docId,
-    version: 1,
-    raw_data: result.rawExtraction || result.extraction || {},
-    extracted_data: result.extraction || {},
-    validation_flags: result.validation || { isValid: false, flags: [], requiresReview: true },
-    confidence_scores: result.confidence || { overall: 0, breakdown: {}, flags: { low_confidence_fields: [] }, status: 'LOW', requiresReview: true }
-  });
-
-  if (extError) {
-    console.error('Failed to insert batch extraction:', extError.message);
-  }
-
-  return docId;
-}
-
 async function authenticateUser(authHeader) {
   if (!authHeader) return null;
-
   const token = authHeader.replace('Bearer ', '');
-
-  const {
-    data: { user },
-    error
-  } = await supabase.auth.getUser(token);
-
+  const { data: { user }, error } = await supabase.auth.getUser(token);
   if (error || !user) return null;
-
   return user;
 }
 
 // ============================================
-// HANDLER
+// BACKGROUND SAVER — Fire and forget, never blocks response
+// ============================================
+
+function saveBatchResultsBackground(userId, results, documentType, creditEstimate, eventHeaders) {
+  // Process each result in parallel, no awaiting in main thread
+  const savePromises = results.map(async (result) => {
+    if (!result.success) return null;
+
+    const docId = uuidv4();
+    const dbStatus = result.dbStatus || (
+      result.status === 'REVIEW_REQUIRED' ? 'review_required' :
+      result.status === 'AUTO_APPROVED' ? 'completed' :
+      'review_required'
+    );
+    const detectedDocType = result.extraction?.document_type || documentType;
+
+    // 1. Insert document (fire and forget internally)
+    const { error: docError } = await supabase.from('documents').insert({
+      id: docId,
+      user_id: userId,
+      file_name: result.fileName,
+      file_type: result.mimeType,
+      file_size: null,
+      document_type: detectedDocType,
+      status: dbStatus,
+      processing_method: result.processingMethod || 'gpt-only',
+      page_count: result.pageCount || 1,
+      credits_used: 1,
+      storage_path: null
+    });
+
+    if (docError) {
+      console.error('Background batch: document insert failed for', result.fileName, ':', docError.message);
+      return null;
+    }
+
+    // 2. Save extraction (parallel, don't block on it)
+    supabase.from('extractions').insert({
+      id: uuidv4(),
+      document_id: docId,
+      version: 1,
+      raw_data: result.rawExtraction || result.extraction || {},
+      extracted_data: result.extraction || {},
+      validation_flags: result.validation || { isValid: false, flags: [], requiresReview: true },
+      confidence_scores: result.confidence || { overall: 0, breakdown: {}, flags: { low_confidence_fields: [] }, status: 'LOW', requiresReview: true }
+    }).then(({ error }) => {
+      if (error) console.error('Background batch: extraction save failed for', result.fileName, ':', error.message);
+    });
+
+    // Attach saved ID to result object for potential response enrichment
+    result.documentId = docId;
+    return docId;
+  });
+
+  // Fire all document saves in parallel, log when done
+  Promise.allSettled(savePromises)
+    .then((results) => {
+      const saved = results.filter(r => r.status === 'fulfilled' && r.value).length;
+      console.log(`Background batch: ${saved}/${results.length} documents saved`);
+    })
+    .catch(err => console.error('Background batch: unexpected error:', err.message));
+
+  // Audit log (completely non-blocking)
+  supabase.from('audit_log').insert({
+    user_id: userId || null,
+    action: 'batch_extraction_completed',
+    resource_type: 'batch',
+    resource_id: null,
+    user_agent: eventHeaders['user-agent'] || null,
+    details: {
+      total_documents: results.length,
+      processed: results.filter(r => r.success).length,
+      failed: results.filter(r => !r.success).length,
+      review_required: results.filter(r => r.status === 'REVIEW_REQUIRED').length,
+      credits_used: creditEstimate?.creditsRequired || 0
+    }
+  }).catch(err => console.error('Background batch: audit log failed:', err.message));
+}
+
+// ============================================
+// HANDLER — Only blocks on batch processing, never on saves
 // ============================================
 
 export async function handler(event) {
   const headers = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers':
-      'Content-Type, Authorization',
-    'Access-Control-Allow-Methods':
-      'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Content-Type': 'application/json'
   };
 
   if (event.httpMethod === 'OPTIONS') {
-    return {
-      statusCode: 204,
-      headers,
-      body: ''
-    };
+    return { statusCode: 204, headers, body: '' };
   }
 
   if (event.httpMethod !== 'POST') {
     return {
       statusCode: 405,
       headers,
-      body: JSON.stringify({
-        error: 'Method not allowed'
-      })
+      body: JSON.stringify({ error: 'Method not allowed' })
     };
   }
 
-  // Declare variables here so catch block can access them
   let user = null;
   let creditEstimate = null;
   let creditResult = null;
@@ -189,37 +179,29 @@ export async function handler(event) {
     //-------------------------------------------------
     // Auth
     //-------------------------------------------------
-
     user = await authenticateUser(
-      event.headers.authorization ||
-        event.headers.Authorization
+      event.headers.authorization || event.headers.Authorization
     );
 
     if (!user) {
       return {
         statusCode: 401,
         headers,
-        body: JSON.stringify({
-          error: 'Unauthorized'
-        })
+        body: JSON.stringify({ error: 'Unauthorized' })
       };
     }
 
     //-------------------------------------------------
     // Parse Upload
     //-------------------------------------------------
-
     const parsed = await parseMultipart(event);
-
     const file = parsed.files[0];
 
     if (!file) {
       return {
         statusCode: 400,
         headers,
-        body: JSON.stringify({
-          error: 'No ZIP uploaded'
-        })
+        body: JSON.stringify({ error: 'No ZIP uploaded' })
       };
     }
 
@@ -230,16 +212,13 @@ export async function handler(event) {
       return {
         statusCode: 400,
         headers,
-        body: JSON.stringify({
-          error: 'Only ZIP files allowed'
-        })
+        body: JSON.stringify({ error: 'Only ZIP files allowed' })
       };
     }
 
     //-------------------------------------------------
     // Credit Check
     //-------------------------------------------------
-
     creditEstimate = await calculateZipCredits(file.buffer);
     creditResult = await deductCredits(user.id, creditEstimate.creditsRequired);
 
@@ -257,42 +236,27 @@ export async function handler(event) {
     }
 
     //-------------------------------------------------
-    // Process Batch
+    // Process Batch — THIS IS THE ONLY BLOCKING WORK
     //-------------------------------------------------
-
     const result = await processBatch({
       zipBuffer: file.buffer,
-      // FIX: Default to 'mixed' for auto-detection
       documentType: parsed.fields.documentType || 'mixed'
     });
 
     //-------------------------------------------------
-    // Save batch results to Supabase
+    // BACKGROUND: All Supabase writes fire-and-forget
     //-------------------------------------------------
-
-    const documentType = parsed.fields.documentType || 'mixed';
-
-    for (const r of result.results) {
-      if (r.success) {
-        const savedDocId = await saveBatchDocument(user.id, r, documentType);
-        if (savedDocId) {
-          r.documentId = savedDocId;
-        }
-      }
-    }
-
-    await auditLog(user.id, 'batch_extraction_completed', 'batch', null, {
-      total_documents: result.totalDocuments,
-      processed: result.processedCount,
-      failed: result.failedCount,
-      review_required: result.reviewRequiredCount,
-      credits_used: creditEstimate.creditsRequired
-    }, event.headers);
+    saveBatchResultsBackground(
+      user.id,
+      result.results,
+      parsed.fields.documentType || 'mixed',
+      creditEstimate,
+      event.headers
+    );
 
     //-------------------------------------------------
-    // Response
+    // RETURN IMMEDIATELY — user gets results NOW
     //-------------------------------------------------
-
     return {
       statusCode: 200,
       headers,
@@ -314,7 +278,7 @@ export async function handler(event) {
     console.error('BATCH EXTRACT ERROR:', error);
 
     // Refund credits on failure
-    if (creditEstimate && creditEstimate.creditsRequired && user && user.id) {
+    if (creditEstimate?.creditsRequired && user?.id) {
       await addCredits(user.id, creditEstimate.creditsRequired, 'batch_refund');
     }
 

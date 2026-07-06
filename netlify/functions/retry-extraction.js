@@ -3,9 +3,11 @@ import { processDocument, countPages } from '../../services/documentProcessor.js
 import { extractWithAWS, isAwsConfigured } from '../../services/awsTextract.js';
 import { extractWithGPT, normalizeExtraction } from '../../services/gptExtractor.js';
 import { validateExtraction } from '../../services/validator.js';
-import { DocumentSchema } from '../../schemas/document.schema.js';
-import { calculateConfidence } from '../../services/confidenceEngine.js';
+import { FlexibleDocumentSchema } from '../../schemas/document.schema.js';
 import { mergeExtraction } from '../../services/mergeEngine.js';
+import { preprocessDocument } from '../../services/documentPreprocessor.js';
+import { postProcessExtraction } from '../../services/documentPostprocessor.js';
+import { sanitizeForZod, sanitizeSections, sanitizeParty } from '../../services/dataSanitizer.js';
 import { deductCredits, addCredits } from '../../services/creditEngine.js';
 
 const supabase = createClient(
@@ -48,7 +50,7 @@ export const handler = async (event, context) => {
   console.log('documentId:', documentId);
   console.log('user.id:', user.id);
 
-  // FIX: Fetch document WITH existing extraction for version tracking
+  // Fetch document WITH existing extraction for version tracking
   const { data: doc, error: docError } = await supabase
     .from('documents')
     .select(`*, extractions (id, version, extracted_data, validation_flags, confidence_scores)`)
@@ -79,7 +81,6 @@ export const handler = async (event, context) => {
     const fallbackPath = `${user.id}/${documentId}/${doc.file_name}`;
     console.log('Fallback path:', fallbackPath);
 
-    // Check if file exists at fallback path
     const { data: listData, error: listError } = await supabase.storage.from('documents').list(`${user.id}/${documentId}`);
     console.log('Storage list result:', listData);
     console.log('Storage list error:', listError);
@@ -138,57 +139,128 @@ export const handler = async (event, context) => {
       credits_used: (doc.credits_used || 0) + pageCount
     }).eq('id', documentId);
 
-    // FIX: Use 'mixed' for auto-detection, not the stored document_type
-    const processedDoc = await processDocument(fileBuffer, doc.file_type);
+    // === NEW PIPELINE (same as extractionPipeline.js) ===
 
+    // STEP 1: Process document
+    const processedDoc = await processDocument(fileBuffer, doc.file_type);
+    console.log('Processed document type:', processedDoc.type);
+
+    // STEP 2: Pre-process
+    console.log('=== PRE-PROCESSOR START ===');
+    const preprocessed = await preprocessDocument(
+      fileBuffer,
+      doc.file_type,
+      doc.file_name,
+      processedDoc.text || ''
+    );
+    console.log('Detected type:', preprocessed.detectedType);
+    console.log('=== PRE-PROCESSOR END ===');
+
+    const effectiveType = (doc.document_type === 'mixed' || doc.document_type === 'unknown') 
+      ? preprocessed.detectedType 
+      : doc.document_type;
+
+    // STEP 3: AWS (optional)
     let awsResult = null;
-    if (isAwsConfigured()) {
+    if (isAwsConfigured() && process.env.ENABLE_AWS === 'true') {
       try {
-        awsResult = await extractWithAWS(fileBuffer, doc.document_type);
-      } catch (e) {
-        console.warn('AWS failed:', e.message);
+        console.log('AWS Textract Processing...');
+        awsResult = await Promise.race([
+          extractWithAWS(fileBuffer, effectiveType),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('AWS_TIMEOUT')), 5000))
+        ]);
+        console.log('AWS Success:', !!awsResult?.extracted);
+      } catch (err) {
+        console.warn('AWS Textract Failed:', err.message);
+        awsResult = null;
+      }
+    } else {
+      console.log('AWS Textract: Skipped (GPT-only mode)');
+    }
+
+    // STEP 4: GPT EXTRACTION
+    console.log('=== GPT EXTRACTION START ===');
+    const gptStart = Date.now();
+
+    const rawGpt = await extractWithGPT(processedDoc, doc.file_name, effectiveType);
+
+    console.log('GPT TOTAL:', ((Date.now() - gptStart) / 1000).toFixed(2), 'seconds');
+    console.log('=== GPT EXTRACTION END ===');
+
+    // STEP 5: Post-process (includes confidence calculation)
+    console.log('POST-PROCESSOR START');
+    const normalizedGpt = normalizeExtraction(rawGpt);
+    const postProcessed = postProcessExtraction(normalizedGpt, effectiveType);
+    console.log('Post-processed type:', postProcessed.document_type);
+    console.log('Post-processed category:', postProcessed.document_category);
+    console.log('POST-PROCESSOR END');
+
+    // STEP 6: Merge
+    const extractionData = mergeExtraction({
+      aws: awsResult?.extracted ?? null,
+      gpt: postProcessed || buildFailedExtraction('GPT returned no extraction')
+    });
+
+    // STEP 7: Sanitize (registry-driven, zero hardcoding)
+    console.log('=== UNIVERSAL SANITIZATION START ===');
+    const sanitizedData = sanitizeForZod(extractionData, effectiveType);
+
+    if (Array.isArray(sanitizedData.sections)) {
+      sanitizedData.sections = sanitizeSections(sanitizedData.sections, effectiveType);
+    }
+
+    sanitizedData.issuer = sanitizeParty(sanitizedData.issuer);
+    sanitizedData.recipient = sanitizeParty(sanitizedData.recipient);
+    if (sanitizedData.buyer) sanitizedData.buyer = sanitizeParty(sanitizedData.buyer);
+    if (sanitizedData.seller) sanitizedData.seller = sanitizeParty(sanitizedData.seller);
+    if (sanitizedData.customer) sanitizedData.customer = sanitizeParty(sanitizedData.customer);
+    if (sanitizedData.supplier) sanitizedData.supplier = sanitizeParty(sanitizedData.supplier);
+
+    console.log('Sanitized sections:', sanitizedData.sections?.length || 0);
+    console.log('=== UNIVERSAL SANITIZATION END ===');
+
+    // STEP 8: Validate schema
+    console.log('Schema validation starting...');
+    let parsedSchema;
+
+    try {
+      parsedSchema = FlexibleDocumentSchema.parse(sanitizedData);
+      console.log('Schema validation: PASSED');
+    } catch (err) {
+      console.error('Schema validation failed');
+      console.error('Zod errors:', err.issues?.map(i => `${i.path.join('.')}: ${i.message}`).join('; '));
+
+      const fixed = applySchemaDefaults(sanitizedData, err.issues);
+      try {
+        parsedSchema = FlexibleDocumentSchema.parse(fixed);
+        console.log('Schema validation: FIXED AND PASSED');
+      } catch (err2) {
+        console.error('Schema validation failed again, using fallback');
+        parsedSchema = FlexibleDocumentSchema.parse(buildFailedExtraction(err2.message));
       }
     }
 
-    const rawGpt = await extractWithGPT(processedDoc);
-    const gptResult = normalizeExtraction(rawGpt);
+    console.log('Schema validation complete.');
 
-    console.log('Retry GPT Doc Type:', gptResult.document_type);
-    console.log('Retry GPT Vendor:', gptResult.vendor_name);
-    console.log('Retry GPT Category:', gptResult.category);
-
-    const extractionData = mergeExtraction({
-      aws: awsResult?.extracted ?? null,
-      gpt: gptResult
-    });
-
-    if (!Array.isArray(extractionData.line_items)) {
-      extractionData.line_items = [];
-    }
-
-    const parsedSchema = DocumentSchema.parse(extractionData);
+    // STEP 9: Validate flags
     const validation = validateExtraction(parsedSchema);
-    const confidence = calculateConfidence(parsedSchema);
 
-    // FIX: Map pipeline status to DB-compatible status
-    const pipelineStatus = confidence.requiresReview || validation.requiresReview
-      ? 'REVIEW_REQUIRED'
-      : 'AUTO_APPROVED';
+    // STEP 10: CONFIDENCE — use post-processor's calculation (single source of truth)
+    const confidence = postProcessed.confidence_scores;
 
-    const dbStatus = pipelineStatus === 'REVIEW_REQUIRED'
-      ? 'review_required'
-      : 'completed';
+    // STEP 11: Final status
+    const needsReview = confidence.requiresReview;
+    const pipelineStatus = needsReview ? 'REVIEW_REQUIRED' : 'AUTO_APPROVED';
+    const dbStatus = needsReview ? 'review_required' : 'completed';
 
-    // FIX: Get next version number from existing extraction
+    // STEP 12: Version tracking
     const existingExtraction = doc.extractions?.[0];
     const nextVersion = existingExtraction?.version
       ? existingExtraction.version + 1
       : 1;
 
-    // FIX: Upsert extraction with proper conflict handling
-    // If an extraction exists, update it. Otherwise insert new.
+    // STEP 13: Save extraction
     if (existingExtraction?.id) {
-      // Update existing extraction
       const { error: updateError } = await supabase
         .from('extractions')
         .update({
@@ -206,7 +278,6 @@ export const handler = async (event, context) => {
         throw updateError;
       }
     } else {
-      // Insert new extraction
       const { error: insertError } = await supabase
         .from('extractions')
         .insert({
@@ -224,14 +295,14 @@ export const handler = async (event, context) => {
       }
     }
 
-    // FIX: Update document with dbStatus and detected document_type
+    // STEP 14: Update document
     await supabase.from('documents').update({
       status: dbStatus,
-      document_type: parsedSchema.document_type,  // Update with GPT-detected type
+      document_type: parsedSchema.document_type,
       processing_method: awsResult ? 'aws-textract' : 'gpt-only'
     }).eq('id', documentId);
 
-    // FIX: Storage cleanup uses dbStatus, not pipelineStatus
+    // Storage cleanup
     if (dbStatus === 'completed') {
       console.log('Auto-approved, cleaning up storage...');
       try {
@@ -250,8 +321,8 @@ export const handler = async (event, context) => {
       headers,
       body: JSON.stringify({
         success: true,
-        status: pipelineStatus,  // Return pipeline status to frontend
-        dbStatus: dbStatus,        // Return DB status for reference
+        status: pipelineStatus,
+        dbStatus: dbStatus,
         extraction: parsedSchema,
         validation,
         confidence,
@@ -280,3 +351,62 @@ export const handler = async (event, context) => {
     };
   }
 };
+
+// === HELPERS (same as extractionPipeline.js) ===
+
+function applySchemaDefaults(data, issues) {
+  const fixed = JSON.parse(JSON.stringify(data));
+
+  for (const issue of issues) {
+    const path = issue.path;
+    if (path.length === 0) continue;
+
+    let current = fixed;
+    for (let i = 0; i < path.length - 1; i++) {
+      if (current === null || current === undefined) break;
+      current = current[path[i]];
+    }
+    const field = path[path.length - 1];
+
+    if (issue.code === 'invalid_type') {
+      if (issue.expected === 'object') {
+        current[field] = {};
+      } else if (issue.expected === 'array') {
+        current[field] = [];
+      } else if (issue.expected === 'string') {
+        current[field] = '';
+      } else if (issue.expected === 'number') {
+        current[field] = null;
+      }
+    }
+  }
+
+  return fixed;
+}
+
+function buildFailedExtraction(notes) {
+  return {
+    document_type: 'unknown',
+    document_category: 'other',
+    notes: typeof notes === 'string' ? notes : JSON.stringify(notes),
+    confidence_scores: {
+      overall: 0,
+      status: 'LOW',
+      requiresReview: true,
+      reviewReason: 'Extraction failed',
+      flags: {
+        low_confidence_fields: [],
+        missing_required_fields: [],
+        invalid_dates: [],
+        math_issue: false,
+        balance_mismatch: false
+      }
+    },
+    _schema_version: 'v8-flexible',
+    _source: { aws: false, gpt: false },
+    issuer: { name: null, address: null, tax_id: null, email: null, phone: null, website: null, registration_number: null, id_number: null },
+    recipient: { name: null, address: null, tax_id: null, email: null, id_number: null, date_of_birth: null },
+    sections: [],
+    specific_fields: {}
+  };
+}
