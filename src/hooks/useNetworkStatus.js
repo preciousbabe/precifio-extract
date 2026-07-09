@@ -1,57 +1,72 @@
-import { useState, useEffect } from 'react';
+// src/hooks/useNetworkStatus.js
+
+import { useState, useEffect, useCallback } from "react";
 
 export function useNetworkStatus() {
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [hasGoodConnection, setHasGoodConnection] = useState(true);
+  const [wasOffline, setWasOffline] = useState(false);
+
+  const checkConnection = useCallback(async () => {
+    if (!navigator.onLine) {
+      setHasGoodConnection(false);
+      return;
+    }
+
+    const start = Date.now();
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+
+      await fetch("https://www.google.com/favicon.ico", {
+        mode: "no-cors",
+        cache: "no-store",
+        signal: controller.signal
+      });
+
+      clearTimeout(timeout);
+      const latency = Date.now() - start;
+      setHasGoodConnection(latency < 3000);
+    } catch {
+      setHasGoodConnection(false);
+    }
+  }, []);
 
   useEffect(() => {
-    const handleOnline = () => setIsOnline(true);
+    const handleOnline = () => {
+      setIsOnline(true);
+      setWasOffline(true);
+      // Recheck connection quality when coming back online
+      setTimeout(checkConnection, 1000);
+    };
+
     const handleOffline = () => {
       setIsOnline(false);
       setHasGoodConnection(false);
     };
 
-    // Check connection quality by pinging a small resource
-    const checkConnection = async () => {
-      if (!navigator.onLine) {
-        setHasGoodConnection(false);
-        return;
-      }
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
 
-      const start = Date.now();
-      try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 5000);
-
-        await fetch('https://www.google.com/favicon.ico', {
-          mode: 'no-cors',
-          cache: 'no-store',
-          signal: controller.signal
-        });
-
-        clearTimeout(timeout);
-        const latency = Date.now() - start;
-
-        // If latency > 3s or fetch fails, mark as bad
-        setHasGoodConnection(latency < 3000);
-      } catch {
-        setHasGoodConnection(false);
-      }
-    };
-
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
-    // Check every 15 seconds
     const interval = setInterval(checkConnection, 15000);
-    checkConnection(); // Initial check
+    checkConnection();
 
     return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
       clearInterval(interval);
     };
+  }, [checkConnection]);
+
+  const dismissOfflineWarning = useCallback(() => {
+    setWasOffline(false);
   }, []);
 
-  return { isOnline, hasGoodConnection, isBad: !isOnline || !hasGoodConnection };
+  return {
+    isOnline,
+    hasGoodConnection,
+    isBad: !isOnline || !hasGoodConnection,
+    wasOffline,
+    dismissOfflineWarning
+  };
 }
