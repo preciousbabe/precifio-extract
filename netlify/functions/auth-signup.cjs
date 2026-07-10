@@ -1,9 +1,9 @@
-import { createClient } from '@supabase/supabase-js';
+const { createClient } = require('@supabase/supabase-js');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 
-export const handler = async (event, context) => {
+exports.handler = async (event, context) => {
   if (event.httpMethod !== 'POST') {
     return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
   }
@@ -59,7 +59,12 @@ export const handler = async (event, context) => {
             <p>You have <strong>10 credits</strong> to start extracting documents.</p>
             <p>Login with your company name: <strong>${companyName}</strong></p>
             <br/>
-            <a href="https://extract.precifio.app" style="background: #1e40af; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px;">Go to Dashboard</a>
+            <p style="margin-top: 20px;">
+         <a href="https://extract.precifio.app?mode=login" style="background: #1e40af; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">Log In to Precifio</a>
+          </p>
+           <p style="font-size: 12px; color: #6b7280; margin-top: 12px;">
+           Click the button above to log in and start extracting documents with your 10 free credits.
+          </p>
           </div>
         `
       })

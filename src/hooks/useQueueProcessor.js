@@ -74,13 +74,18 @@ export function useQueueProcessor(queueApi) {
         completedAt: new Date().toISOString()
       });
 
-    } catch (err) {
-      updateItem(item.id, {
-        status: "failed",
-        error: err.message,
-        completedAt: new Date().toISOString()
-      });
-    }
+   // In processItem catch block:
+
+} catch (err) {
+  console.error('Process error:', err.message, err.code);
+  
+  updateItem(item.id, {
+    status: "failed",
+    error: err.message,
+    errorCode: err.code || null,
+    completedAt: new Date().toISOString()
+  });
+  }
   }
 
   //----------------------------------------------------

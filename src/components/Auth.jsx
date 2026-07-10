@@ -2,16 +2,19 @@ import { useState } from 'react';
 
 const API_BASE = '/.netlify/functions';
 
-export function Auth() {
+export function Auth({ initialMode = 'login' }) {
+  const [isLoginView, setIsLoginView] = useState(initialMode !== 'signup');
   const [email, setEmail] = useState('');
   const [fullName, setFullName] = useState('');
   const [companyName, setCompanyName] = useState('');
   const [password, setPassword] = useState('');
-  const [isLoginView, setIsLoginView] = useState(true);
   const [loginCompany, setLoginCompany] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showLoginPassword, setShowLoginPassword] = useState(false);
+  const [justSignedUp, setJustSignedUp] = useState(false);
 
   const inputStyle = {
     padding: '12px',
@@ -36,16 +39,22 @@ export function Auth() {
         body: JSON.stringify({ email, password, fullName, companyName })
       });
 
-      const data = await response.json();
+      const result = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error);
+        throw new Error(result.error);
       }
 
-      setMessage(data.message);
-      // Optionally auto-switch to login after delay
-      setTimeout(() => setIsLoginView(true), 2000);
-
+      // Show success message, prompt to check email
+      setMessage("🎉 Account created! Check your email and click the login button to start using Precifio with 10 free credits.");
+      
+      // Clear form
+      setEmail('');
+      setFullName('');
+      setCompanyName('');
+      setPassword('');
+      setJustSignedUp(true);
+      
     } catch (error) {
       setMessage(error.message);
     }
@@ -102,14 +111,34 @@ export function Auth() {
             required
             style={inputStyle}
           />
-          <input
-            type="password"
-            placeholder="Password"
-            value={loginPassword}
-            onChange={(e) => setLoginPassword(e.target.value)}
-            required
-            style={inputStyle}
-          />
+                    <div style={{ position: 'relative' }}>
+            <input
+              type={showLoginPassword ? 'text' : 'password'}
+              placeholder="Password"
+              value={loginPassword}
+              onChange={(e) => setLoginPassword(e.target.value)}
+              required
+              style={{ ...inputStyle, width: '100%', paddingRight: '40px' }}
+            />
+            <button
+              type="button"
+              onClick={() => setShowLoginPassword(!showLoginPassword)}
+              style={{
+                position: 'absolute',
+                right: '10px',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                fontSize: '18px',
+                color: '#6b7280'
+              }}
+            >
+              {showLoginPassword ? '🙈' : '👁️'}
+            </button>
+          </div>
+
           <button
             type="submit"
             disabled={loading}
@@ -126,18 +155,58 @@ export function Auth() {
           <input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required style={inputStyle} />
           <input type="text" placeholder="Full Name" value={fullName} onChange={(e) => setFullName(e.target.value)} required style={inputStyle} />
           <input type="text" placeholder="Company Name" value={companyName} onChange={(e) => setCompanyName(e.target.value)} required style={inputStyle} />
-          <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} style={inputStyle} />
+                    <div style={{ position: 'relative' }}>
+            <input 
+              type={showPassword ? 'text' : 'password'} 
+              placeholder="Password" 
+              value={password} 
+              onChange={(e) => setPassword(e.target.value)} 
+              required 
+              minLength={6} 
+              style={{ ...inputStyle, width: '100%', paddingRight: '40px' }} 
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              style={{
+                position: 'absolute',
+                right: '10px',
+                top: '50%',
+                transform: 'translateY(-50%)',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                fontSize: '18px',
+                color: '#6b7280'
+              }}
+            >
+              {showPassword ? '🙈' : '👁️'}
+            </button>
+          </div>
+
           <button type="submit" disabled={loading} style={{ padding: '12px', background: '#1e40af', color: '#fff', border: 'none', borderRadius: '6px' }}>
             {loading ? 'Loading...' : 'Sign Up'}
           </button>
-          <p onClick={() => setIsLoginView(true)} style={{ textAlign: 'center', cursor: 'pointer', color: '#1e40af' }}>
-            Already have an account? Sign In
-          </p>
+                    {justSignedUp ? (
+            <p style={{ textAlign: 'center', color: '#6b7280', fontSize: '14px', fontStyle: 'italic' }}>
+              ✉️ Please check your email and click the login link to continue
+            </p>
+          ) : (
+            <p onClick={() => setIsLoginView(true)} style={{ textAlign: 'center', cursor: 'pointer', color: '#1e40af' }}>
+              Already have an account? Sign In
+            </p>
+          )}
         </form>
       )}
 
-      {message && (
-        <div style={{ marginTop: '16px', padding: '12px', borderRadius: '6px', background: message.includes('success') ? '#d1fae5' : '#fee2e2', color: message.includes('success') ? '#065f46' : '#991b1b' }}>
+            {message && (
+        <div style={{ 
+          marginTop: '16px', 
+          padding: '12px', 
+          borderRadius: '6px', 
+          background: message.includes('🎉') || message.includes('success') || message.includes('created') ? '#d1fae5' : '#fee2e2', 
+          color: message.includes('🎉') || message.includes('success') || message.includes('created') ? '#065f46' : '#991b1b' 
+        }}>
           {message}
         </div>
       )}

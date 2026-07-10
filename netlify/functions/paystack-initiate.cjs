@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+const { createClient } = require('@supabase/supabase-js');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -7,7 +7,7 @@ const supabase = createClient(
 
 const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY;
 
-export async function handler(event, context) {
+exports.handler = async (event, context) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
@@ -81,4 +81,4 @@ export async function handler(event, context) {
     console.error('Paystack initiate error:', error);
     return { statusCode: 500, headers, body: JSON.stringify({ error: error.message }) };
   }
-}
+};

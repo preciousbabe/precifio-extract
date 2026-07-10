@@ -1197,3 +1197,70 @@ body {
     grid-template-columns: repeat(2, 1fr);
   }
 }
+
+
+
+
+
+
+
+
+/* Guest Banner */
+.guest-banner {
+  background: linear-gradient(135deg, var(--primary-50), var(--primary-100));
+  border: 1px solid var(--primary-200);
+  border-radius: var(--radius-lg);
+  padding: 14px 20px;
+  margin-bottom: 16px;
+}
+
+.guest-banner-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.guest-banner span {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--primary-800);
+}
+
+.guest-banner-btn {
+  padding: 8px 18px;
+  background: var(--primary-600);
+  color: var(--white);
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.guest-banner-btn:hover {
+  background: var(--primary-700);
+}
+
+/* Guest Badge on Queue Item */
+.guest-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  background: var(--warning-100);
+  color: var(--warning-700);
+  border-radius: 999px;
+  font-size: 0.625rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* Queue Item Meta */
+.queue-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

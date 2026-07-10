@@ -1,6 +1,8 @@
-import { createClient } from '@supabase/supabase-js';
+// netlify/functions/auth-me.js — CommonJS version
 
-export const handler = async (event, context) => {
+const { createClient } = require('@supabase/supabase-js');
+
+exports.handler = async (event, context) => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
@@ -22,7 +24,6 @@ export const handler = async (event, context) => {
   }
 
   try {
-    // Use SERVICE ROLE for profile queries (bypasses RLS)
     const supabase = createClient(
       process.env.SUPABASE_URL, 
       process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -34,14 +35,12 @@ export const handler = async (event, context) => {
       return { statusCode: 401, headers, body: JSON.stringify({ error: 'Invalid token' }) };
     }
 
-    // Get profile data — use maybeSingle() instead of single() to avoid error when no row
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
       .select('*')
       .eq('id', user.id)
       .maybeSingle();
 
-    // If no profile exists, create one with 10 free credits
     let userProfile = profile;
     if (!profile) {
       console.log('No profile found for user', user.id, '- creating with 10 credits');
@@ -61,7 +60,6 @@ export const handler = async (event, context) => {
 
       if (createError) {
         console.error('Failed to create profile:', createError);
-        // Return fallback profile object so frontend still works
         userProfile = { 
           id: user.id, 
           credits_remaining: 10,

@@ -4,21 +4,33 @@ import QueueToolbar from "./QueueToolbar";
 import QueueSummary from "./QueueSummary";
 import QueueItem from "./QueueItem";
 import QueueViewer from "./QueueViewer";
+import AuthModal from "../AuthModal"; 
+import { useAuth } from "../../hooks/useAuth";
 
 export default function DocumentQueue({ queue }) {
-  if (queue.items.length === 0) {
-    return null;
-  }
+  const { isGuest, showAuthModal, setShowAuthModal, authModalMode, requireAuth } = useAuth();
 
-  const hasSelection = queue.selectedIds.size > 0;
+  if (queue.items.length === 0) return null;
 
   return (
     <div className="document-queue">
+      {/* Guest Banner */}
+      {isGuest && (
+        <div className="guest-banner">
+          <div className="guest-banner-content">
+            <span>👋 You're using Precifio as a guest — 1 free extraction</span>
+            <button onClick={() => requireAuth('signup')} className="guest-banner-btn">
+              Sign Up for 10 Free Credits
+            </button>
+          </div>
+        </div>
+      )}
+
       <QueueToolbar
         stats={queue.stats}
         isProcessing={queue.processing}
         isPaused={queue.paused}
-        hasSelection={hasSelection}
+        hasSelection={queue.selectedIds.size > 0}
         onStart={queue.start}
         onPause={queue.pause}
         onResume={queue.resume}
@@ -34,11 +46,7 @@ export default function DocumentQueue({ queue }) {
 
       <div className="queue-list">
         {queue.items.map(item => (
-          <QueueItem
-            key={item.id}
-            item={item}
-            queue={queue}
-          />
+          <QueueItem key={item.id} item={item} queue={queue} />
         ))}
       </div>
 
@@ -46,6 +54,14 @@ export default function DocumentQueue({ queue }) {
         item={queue.selectedItem}
         onClose={() => queue.selectItem(null)}
       />
+
+      {/* Auth Modal */}
+      {showAuthModal && (
+        <AuthModal 
+          mode={authModalMode}
+          onClose={() => setShowAuthModal(false)}
+        />
+      )}
     </div>
   );
 }
