@@ -45,10 +45,8 @@ export function Auth({ initialMode = 'login' }) {
         throw new Error(result.error);
       }
 
-      // Show success message, prompt to check email
       setMessage("🎉 Account created! Check your email and click the login button to start using Precifio with 10 free credits.");
       
-      // Clear form
       setEmail('');
       setFullName('');
       setCompanyName('');
@@ -85,8 +83,8 @@ export function Auth({ initialMode = 'login' }) {
         throw new Error(data.error);
       }
 
-      // Store session in localStorage or memory
-      localStorage.setItem('precifio_session', JSON.stringify(data.session));
+      // ✅ FIXED: Use precifio_token consistently
+      localStorage.setItem('precifio_token', data.session.access_token);
       setMessage('Signed in successfully!');
       window.location.reload();
 
@@ -111,7 +109,7 @@ export function Auth({ initialMode = 'login' }) {
             required
             style={inputStyle}
           />
-                    <div style={{ position: 'relative' }}>
+          <div style={{ position: 'relative' }}>
             <input
               type={showLoginPassword ? 'text' : 'password'}
               placeholder="Password"
@@ -155,7 +153,7 @@ export function Auth({ initialMode = 'login' }) {
           <input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required style={inputStyle} />
           <input type="text" placeholder="Full Name" value={fullName} onChange={(e) => setFullName(e.target.value)} required style={inputStyle} />
           <input type="text" placeholder="Company Name" value={companyName} onChange={(e) => setCompanyName(e.target.value)} required style={inputStyle} />
-                    <div style={{ position: 'relative' }}>
+          <div style={{ position: 'relative' }}>
             <input 
               type={showPassword ? 'text' : 'password'} 
               placeholder="Password" 
@@ -187,7 +185,7 @@ export function Auth({ initialMode = 'login' }) {
           <button type="submit" disabled={loading} style={{ padding: '12px', background: '#1e40af', color: '#fff', border: 'none', borderRadius: '6px' }}>
             {loading ? 'Loading...' : 'Sign Up'}
           </button>
-                    {justSignedUp ? (
+          {justSignedUp ? (
             <p style={{ textAlign: 'center', color: '#6b7280', fontSize: '14px', fontStyle: 'italic' }}>
               ✉️ Please check your email and click the login link to continue
             </p>
@@ -199,7 +197,7 @@ export function Auth({ initialMode = 'login' }) {
         </form>
       )}
 
-            {message && (
+      {message && (
         <div style={{ 
           marginTop: '16px', 
           padding: '12px', 

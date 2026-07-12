@@ -4,18 +4,28 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SER
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 
 exports.handler = async (event, context) => {
+  const headers = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Content-Type': 'application/json'
+  };
+
+  if (event.httpMethod === 'OPTIONS') {
+    return { statusCode: 204, headers, body: '' };
+  }
+
   if (event.httpMethod !== 'POST') {
-    return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed' }) };
+    return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method not allowed' }) };
   }
 
   const { email, password, fullName, companyName } = JSON.parse(event.body);
 
   if (!email || !password || !fullName || !companyName) {
-    return { statusCode: 400, body: JSON.stringify({ error: 'All fields required' }) };
+    return { statusCode: 400, headers, body: JSON.stringify({ error: 'All fields required' }) };
   }
 
   try {
-    // 1. Create auth user in Supabase (auto-confirmed since we handle emails via Resend)
     const { data: authData, error: authError } = await supabase.auth.admin.createUser({
       email,
       password,
@@ -27,7 +37,6 @@ exports.handler = async (event, context) => {
 
     const userId = authData.user.id;
 
-    // 2. MANUALLY insert into profiles table (no triggers!)
     const { error: profileError } = await supabase
       .from('profiles')
       .insert({
@@ -41,7 +50,6 @@ exports.handler = async (event, context) => {
 
     if (profileError) throw profileError;
 
-    // 3. Send welcome email via Resend
     await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
@@ -60,11 +68,11 @@ exports.handler = async (event, context) => {
             <p>Login with your company name: <strong>${companyName}</strong></p>
             <br/>
             <p style="margin-top: 20px;">
-         <a href="https://extract.precifio.app?mode=login" style="background: #1e40af; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">Log In to Precifio</a>
-          </p>
-           <p style="font-size: 12px; color: #6b7280; margin-top: 12px;">
-           Click the button above to log in and start extracting documents with your 10 free credits.
-          </p>
+              <a href="https://extract.precifio.app?mode=login" style="background: #1e40af; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">Log In to Precifio</a>
+            </p>
+            <p style="font-size: 12px; color: #6b7280; margin-top: 12px;">
+              Click the button above to log in and start extracting documents with your 10 free credits.
+            </p>
           </div>
         `
       })
@@ -72,6 +80,7 @@ exports.handler = async (event, context) => {
 
     return {
       statusCode: 200,
+      headers,
       body: JSON.stringify({
         success: true,
         message: 'Account created successfully! Check your email.',
@@ -80,6 +89,6 @@ exports.handler = async (event, context) => {
     };
 
   } catch (error) {
-    return { statusCode: 400, body: JSON.stringify({ error: error.message }) };
+    return { statusCode: 400, headers, body: JSON.stringify({ error: error.message }) };
   }
 };

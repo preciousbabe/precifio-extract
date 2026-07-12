@@ -42,16 +42,20 @@ function inferMimeType(filename) {
   return map[ext] || 'application/octet-stream';
 }
 
-function calculateCost(chars, model) {
-  const tokens = Math.ceil(chars / 4);
-  const rates = {
-    'gpt-4o': 0.5,
-    'gpt-4o-mini': 0.1,
-    'claude-3-5-sonnet': 0.6,
-    'gemini-1.5-pro': 0.4
-  };
-  const rate = rates[model] || rates['gpt-4o'];
-  return Math.max(1, Math.ceil((tokens / 1000) * rate));
+/**
+ * Calculate cost in CREDITS based on estimated page count.
+ * 1 credit = 1 page (~500 words or ~750 tokens).
+ * No charge for failed extractions — credits only deducted on success.
+ */
+function calculatePageCost(extraction) {
+  const text = extraction.text || '';
+  const wordCount = text.split(/\s+/).filter(w => w.length > 0).length;
+  
+  // Estimate pages: ~500 words per page, minimum 1 page
+  const estimatedPages = Math.max(1, Math.ceil(wordCount / 500));
+  
+  // Cap at 50 pages to prevent abuse on huge files
+  return Math.min(estimatedPages, 50);
 }
 
 exports.handler = async (event, context) => {
@@ -172,7 +176,7 @@ exports.handler = async (event, context) => {
         };
       }
 
-      // CHANGED: Limit from 3 to 1 extraction
+      // Guest limit: 1 free extraction
       if (extractionCount >= 1) {
         return {
           statusCode: 402,
@@ -209,7 +213,7 @@ exports.handler = async (event, context) => {
     }
 
     //--------------------------------------------------------
-    // Extract text
+    // Extract text (NO charge yet — we check credits first)
     //--------------------------------------------------------
 
     const extraction = await extractTextFromFile(file);
@@ -224,6 +228,7 @@ exports.handler = async (event, context) => {
     const cleanedText = cleanOCR(finalText || '');
 
     if (!cleanedText || cleanedText.length < 10) {
+      // NO charge for failed extraction
       return {
         statusCode: 422,
         headers,
@@ -237,6 +242,9 @@ exports.handler = async (event, context) => {
       };
     }
 
+    // Calculate cost in pages/credits
+    const cost = calculatePageCost({ text: cleanedText });
+
     //--------------------------------------------------------
     // Credit Check & Deduction (Authenticated users only)
     //--------------------------------------------------------
@@ -248,7 +256,6 @@ exports.handler = async (event, context) => {
         .eq('id', userId)
         .single();
 
-      const cost = calculateCost(cleanedText.length, config.ai.provider);
       const currentCredits = profile ? profile.credits_remaining : 0;
 
       if (currentCredits < cost) {
@@ -257,42 +264,110 @@ exports.handler = async (event, context) => {
           headers,
           body: JSON.stringify({
             error: 'Insufficient credits',
+            code: 'INSUFFICIENT_CREDITS',
             required: cost,
             available: currentCredits,
-            isGuest: false
+            isGuest: false,
+            message: `This document costs ${cost} credit${cost > 1 ? 's' : ''}. You have ${currentCredits} remaining.`
           })
         };
       }
 
-      // Deduct credits
+      // Deduct credits BEFORE AI call (refund if AI fails)
+      const newBalance = currentCredits - cost;
+      
       await supabase
         .from('profiles')
-        .update({ credits_remaining: currentCredits - cost })
+        .update({ credits_remaining: newBalance })
         .eq('id', userId);
 
-      // Log transaction
+      // Log pre-deduction transaction
       await supabase.from('credit_transactions').insert({
         user_id: userId,
         amount: -cost,
         type: 'extraction',
-        balance_after: currentCredits - cost,
+        balance_after: newBalance,
         metadata: {
           file_name: file.name,
-          chars: cleanedText.length,
-          cost,
-          model: config.ai.provider
+          pages: cost,
+          words: cleanedText.split(/\s+/).filter(w => w.length > 0).length,
+          model: config.ai.provider,
+          status: 'pending'
         }
       });
 
-      console.log(`Deducted ${cost} credits from user ${userId}. Balance: ${currentCredits - cost}`);
+      console.log(`Reserved ${cost} credits from user ${userId}. Balance: ${newBalance}`);
     }
 
     //--------------------------------------------------------
     // AI extraction
     //--------------------------------------------------------
 
-    const aiClient = new AIClient();
-    const extractedData = await aiClient.extract(cleanedText);
+    let extractedData;
+    try {
+      const aiClient = new AIClient();
+      extractedData = await aiClient.extract(cleanedText);
+    } catch (aiError) {
+      // AI failed — REFUND credits if authenticated
+      if (!isGuest && userId) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('credits_remaining')
+          .eq('id', userId)
+          .single();
+        
+        const refundedBalance = (profile?.credits_remaining || 0) + cost;
+        
+        await supabase
+          .from('profiles')
+          .update({ credits_remaining: refundedBalance })
+          .eq('id', userId);
+
+        await supabase.from('credit_transactions').insert({
+          user_id: userId,
+          amount: cost,
+          type: 'refund',
+          balance_after: refundedBalance,
+          metadata: {
+            file_name: file.name,
+            pages: cost,
+            reason: 'ai_extraction_failed',
+            error: aiError.message
+          }
+        });
+
+        console.log(`Refunded ${cost} credits to user ${userId} due to AI error. Balance: ${refundedBalance}`);
+      }
+
+      return {
+        statusCode: 500,
+        headers,
+        body: JSON.stringify({
+          error: 'AI extraction failed',
+          message: aiError.message,
+          refunded: !isGuest
+        })
+      };
+    }
+
+    // Update transaction to completed
+    if (!isGuest && userId) {
+      await supabase
+        .from('credit_transactions')
+        .update({ 
+          metadata: {
+            file_name: file.name,
+            pages: cost,
+            words: cleanedText.split(/\s+/).filter(w => w.length > 0).length,
+            model: config.ai.provider,
+            status: 'completed'
+          }
+        })
+        .eq('user_id', userId)
+        .eq('type', 'extraction')
+        .order('created_at', { ascending: false })
+        .limit(1);
+    }
 
     return {
       statusCode: 200,
@@ -308,10 +383,12 @@ exports.handler = async (event, context) => {
           extraction: {
             ...extraction.metadata,
             finalMethod: extractionMethod,
-            textLength: cleanedText.length
+            textLength: cleanedText.length,
+            wordCount: cleanedText.split(/\s+/).filter(w => w.length > 0).length,
+            estimatedPages: cost
           },
           aiProvider: config.ai.provider,
-          creditsUsed: isGuest ? 0 : calculateCost(cleanedText.length, config.ai.provider)
+          creditsUsed: isGuest ? 0 : cost
         }
       })
     };
@@ -329,4 +406,3 @@ exports.handler = async (event, context) => {
     };
   }
 };
-

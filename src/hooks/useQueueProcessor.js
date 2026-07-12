@@ -1,5 +1,6 @@
 // src/hooks/useQueueProcessor.js
 // Processes queue items one at a time, sequentially.
+// Handles 402 responses for guest limits and insufficient credits.
 
 import { useEffect, useRef } from "react";
 import queueManager from "../services/queueManager";
@@ -14,7 +15,7 @@ export function useQueueProcessor(queueApi) {
     stop
   } = queueApi;
 
-  // Refs to always access latest values inside async functions
+  // Refs to always access latest values inside async function
   const itemsRef = useRef(items);
   itemsRef.current = items;
 
@@ -74,18 +75,51 @@ export function useQueueProcessor(queueApi) {
         completedAt: new Date().toISOString()
       });
 
-   // In processItem catch block:
+    } catch (err) {
+      console.error('Process error:', err.message, err.code);
 
-} catch (err) {
-  console.error('Process error:', err.message, err.code);
-  
-  updateItem(item.id, {
-    status: "failed",
-    error: err.message,
-    errorCode: err.code || null,
-    completedAt: new Date().toISOString()
-  });
-  }
+      // Handle 402 payment/auth errors
+      if (err.status === 402 || err.code === 'GUEST_LIMIT_REACHED' || err.code === 'INSUFFICIENT_CREDITS' || err.code === 'GUEST_EXPIRED') {
+        
+        // Guest limit reached or expired — show signup modal
+        if (err.code === 'GUEST_LIMIT_REACHED' || err.code === 'GUEST_EXPIRED') {
+          window.dispatchEvent(new CustomEvent('showAuthModal', {
+            detail: { mode: 'signup' }
+          }));
+        }
+        
+        // Insufficient credits — show buy credits modal with context
+        if (err.code === 'INSUFFICIENT_CREDITS') {
+          window.dispatchEvent(new CustomEvent('showBuyCredits', {
+            detail: {
+              required: err.required || 1,
+              available: err.available || 0,
+              fileName: item.file.name
+            }
+          }));
+        }
+
+        updateItem(item.id, {
+          status: "failed",
+          error: err.message,
+          errorCode: err.code,
+          needsAction: err.code === 'INSUFFICIENT_CREDITS' ? 'buy-credits' : 'signup',
+          completedAt: new Date().toISOString()
+        });
+
+        // Pause queue so user can take action
+        queueApi.pause();
+        return;
+      }
+
+      // All other errors
+      updateItem(item.id, {
+        status: "failed",
+        error: err.message,
+        errorCode: err.code || null,
+        completedAt: new Date().toISOString()
+      });
+    }
   }
 
   //----------------------------------------------------
@@ -110,5 +144,5 @@ export function useQueueProcessor(queueApi) {
       isRunningRef.current = false;
     });
 
-  }, [processing, paused, items, stop, setCurrentIndex, updateItem]);
+  }, [processing, paused, items, stop, setCurrentIndex, updateItem, queueApi]);
 }

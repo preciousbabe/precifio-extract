@@ -1,11 +1,14 @@
-// netlify/functions/auth-me.js — CommonJS version
+// netlify/functions/auth-me.js
 
 const { createClient } = require('@supabase/supabase-js');
 
 exports.handler = async (event, context) => {
+  context.callbackWaitsForEmptyEventLoop = false;
+
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Allow-Methods': 'GET, OPTIONS',
     'Content-Type': 'application/json'
   };
 
@@ -17,7 +20,8 @@ exports.handler = async (event, context) => {
     return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method not allowed' }) };
   }
 
-  const token = event.headers.authorization?.replace('Bearer ', '');
+  const authHeader = event.headers.authorization || event.headers.Authorization;
+  const token = authHeader ? authHeader.replace('Bearer ', '') : null;
 
   if (!token) {
     return { statusCode: 401, headers, body: JSON.stringify({ error: 'No token provided' }) };
@@ -25,7 +29,7 @@ exports.handler = async (event, context) => {
 
   try {
     const supabase = createClient(
-      process.env.SUPABASE_URL, 
+      process.env.SUPABASE_URL,
       process.env.SUPABASE_SERVICE_ROLE_KEY
     );
 
@@ -42,9 +46,10 @@ exports.handler = async (event, context) => {
       .maybeSingle();
 
     let userProfile = profile;
-    if (!profile) {
+
+    if (!userProfile) {
       console.log('No profile found for user', user.id, '- creating with 10 credits');
-      
+
       const { data: newProfile, error: createError } = await supabase
         .from('profiles')
         .insert({
@@ -60,11 +65,13 @@ exports.handler = async (event, context) => {
 
       if (createError) {
         console.error('Failed to create profile:', createError);
-        userProfile = { 
-          id: user.id, 
+        // Fallback: return minimal profile so frontend still works
+        userProfile = {
+          id: user.id,
+          email: user.email,
           credits_remaining: 10,
           full_name: user.user_metadata?.full_name || null,
-          email: user.email
+          company_name: user.user_metadata?.company_name || null
         };
       } else {
         userProfile = newProfile;

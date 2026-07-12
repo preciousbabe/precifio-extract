@@ -8,14 +8,18 @@ import AuthModal from "../AuthModal";
 import { useAuth } from "../../hooks/useAuth";
 
 export default function DocumentQueue({ queue }) {
-  const { isGuest, showAuthModal, setShowAuthModal, authModalMode, requireAuth } = useAuth();
+  const { isGuest, loading, showAuthModal, setShowAuthModal, authModalMode, requireAuth } = useAuth();
 
   if (queue.items.length === 0) return null;
 
+  // Don't show guest banner while auth is still loading
+  // This prevents the flash of "guest mode" after login
+  const showGuestBanner = !loading && isGuest;
+
   return (
     <div className="document-queue">
-      {/* Guest Banner */}
-      {isGuest && (
+      {/* Guest Banner — only show when auth is resolved and user is actually guest */}
+      {showGuestBanner && (
         <div className="guest-banner">
           <div className="guest-banner-content">
             <span>👋 You're using Precifio as a guest — 1 free extraction</span>
