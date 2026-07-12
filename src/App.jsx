@@ -12,8 +12,25 @@ import { useNetworkStatus } from "./hooks/useNetworkStatus";
 import { AuthProvider, useAuth } from "./hooks/useAuth";
 
 function AppContent() {
+  // ✅ MUST be first — before any useEffect that uses these values
+  const { 
+    user, 
+    isGuest, 
+    profile, 
+    setProfile,           // ← ✅ Now properly exposed from useAuth
+    showAuthModal, 
+    setShowAuthModal, 
+    setAuthModalMode, 
+    logout 
+  } = useAuth();
+
   const [showBuyCredits, setShowBuyCredits] = useState(false);
   const [creditAlert, setCreditAlert] = useState(null);
+
+  const queue = useDocumentQueue();
+  const network = useNetworkStatus();
+  
+  useQueueProcessor(queue);
 
   // Check for ?mode=login from email link
   useEffect(() => {
@@ -23,7 +40,7 @@ function AppContent() {
       setAuthModalMode('login');
       window.history.replaceState({}, '', window.location.pathname);
     }
-  }, []);
+  }, [setShowAuthModal, setAuthModalMode]);
 
   // Listen for insufficient credits event from queue processor
   useEffect(() => {
@@ -35,11 +52,14 @@ function AppContent() {
     return () => window.removeEventListener('showBuyCredits', handleShowBuyCredits);
   }, []);
 
-  const queue = useDocumentQueue();
-  const network = useNetworkStatus();
-  const { user, isGuest, profile, showAuthModal, setShowAuthModal, setAuthModalMode, logout } = useAuth();
-
-  useQueueProcessor(queue);
+  // ✅ Listen for real-time credit updates from successful extractions (no API call)
+  useEffect(() => {
+    const handleCreditsUpdated = (e) => {
+      setProfile(prev => prev ? { ...prev, credits_remaining: e.detail.newBalance } : prev);
+    };
+    window.addEventListener('creditsUpdated', handleCreditsUpdated);
+    return () => window.removeEventListener('creditsUpdated', handleCreditsUpdated);
+  }, [setProfile]);
 
   useEffect(() => {
     if (network.isBad && queue.processing) {

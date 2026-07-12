@@ -1,4 +1,4 @@
-// netlify/function/extract/extract.js
+// netlify/functions/extract/extract.js
 const config = require('../../../config');
 const { validateUpload } = require('../utils/validate-upload');
 const { extractTextFromFile } = require('../services/extractor-service');
@@ -44,17 +44,12 @@ function inferMimeType(filename) {
 
 /**
  * Calculate cost in CREDITS based on estimated page count.
- * 1 credit = 1 page (~500 words or ~750 tokens).
- * No charge for failed extractions — credits only deducted on success.
+ * 1 credit = 1 page (~500 words).
+ * No charge for failed extractions.
  */
-function calculatePageCost(extraction) {
-  const text = extraction.text || '';
+function calculatePageCost(text) {
   const wordCount = text.split(/\s+/).filter(w => w.length > 0).length;
-  
-  // Estimate pages: ~500 words per page, minimum 1 page
   const estimatedPages = Math.max(1, Math.ceil(wordCount / 500));
-  
-  // Cap at 50 pages to prevent abuse on huge files
   return Math.min(estimatedPages, 50);
 }
 
@@ -79,6 +74,9 @@ exports.handler = async (event, context) => {
       body: JSON.stringify({ error: 'Method not allowed' })
     };
   }
+
+  let transactionId = null;  // Track for updating status later
+  let newBalance = null;     // Track newBalance for response (MUST be outer scope!)
 
   try {
     const parsed = parseMultipart(event);
@@ -158,7 +156,6 @@ exports.handler = async (event, context) => {
 
       const extractionCount = guestRecord ? guestRecord.extraction_count : 0;
 
-      // Check 30-day expiry
       const daysActive = guestRecord 
         ? (Date.now() - new Date(guestRecord.first_used).getTime()) / (1000 * 60 * 60 * 24)
         : 0;
@@ -176,7 +173,6 @@ exports.handler = async (event, context) => {
         };
       }
 
-      // Guest limit: 1 free extraction
       if (extractionCount >= 1) {
         return {
           statusCode: 402,
@@ -191,7 +187,6 @@ exports.handler = async (event, context) => {
         };
       }
 
-      // Record or increment guest extraction
       if (guestRecord) {
         await supabase
           .from('guest_extractions')
@@ -213,7 +208,7 @@ exports.handler = async (event, context) => {
     }
 
     //--------------------------------------------------------
-    // Extract text (NO charge yet — we check credits first)
+    // Extract text (NO charge yet)
     //--------------------------------------------------------
 
     const extraction = await extractTextFromFile(file);
@@ -242,8 +237,8 @@ exports.handler = async (event, context) => {
       };
     }
 
-    // Calculate cost in pages/credits
-    const cost = calculatePageCost({ text: cleanedText });
+    // Calculate cost in pages
+    const cost = calculatePageCost(cleanedText);
 
     //--------------------------------------------------------
     // Credit Check & Deduction (Authenticated users only)
@@ -274,27 +269,38 @@ exports.handler = async (event, context) => {
       }
 
       // Deduct credits BEFORE AI call (refund if AI fails)
-      const newBalance = currentCredits - cost;
+      newBalance = currentCredits - cost;
       
       await supabase
         .from('profiles')
         .update({ credits_remaining: newBalance })
         .eq('id', userId);
 
-      // Log pre-deduction transaction
-      await supabase.from('credit_transactions').insert({
-        user_id: userId,
-        amount: -cost,
-        type: 'extraction',
-        balance_after: newBalance,
-        metadata: {
-          file_name: file.name,
-          pages: cost,
-          words: cleanedText.split(/\s+/).filter(w => w.length > 0).length,
-          model: config.ai.provider,
-          status: 'pending'
-        }
-      });
+      // Log extraction transaction with status as TOP-LEVEL column
+      const { data: txData, error: txError } = await supabase
+        .from('credit_transactions')
+        .insert({
+          user_id: userId,
+          amount: -cost,
+          type: 'extraction',
+          balance_after: newBalance,
+          status: 'pending',                    // TOP-LEVEL, not in metadata
+          metadata: {
+            file_name: file.name,
+            pages: cost,
+            words: cleanedText.split(/\s+/).filter(w => w.length > 0).length,
+            model: config.ai.provider,
+            chars: cleanedText.length
+          }
+        })
+        .select('id')
+        .single();
+
+      if (txError) {
+        console.error('Failed to log extraction transaction:', txError);
+      } else {
+        transactionId = txData?.id;              // Store ID for later update
+      }
 
       console.log(`Reserved ${cost} credits from user ${userId}. Balance: ${newBalance}`);
     }
@@ -323,11 +329,13 @@ exports.handler = async (event, context) => {
           .update({ credits_remaining: refundedBalance })
           .eq('id', userId);
 
+        // Log refund transaction
         await supabase.from('credit_transactions').insert({
           user_id: userId,
           amount: cost,
           type: 'refund',
           balance_after: refundedBalance,
+          status: 'completed',
           metadata: {
             file_name: file.name,
             pages: cost,
@@ -335,6 +343,14 @@ exports.handler = async (event, context) => {
             error: aiError.message
           }
         });
+
+        // Mark original pending transaction as failed (if we have the ID)
+        if (transactionId) {
+          await supabase
+            .from('credit_transactions')
+            .update({ status: 'failed' })
+            .eq('id', transactionId);
+        }
 
         console.log(`Refunded ${cost} credits to user ${userId} due to AI error. Balance: ${refundedBalance}`);
       }
@@ -350,23 +366,16 @@ exports.handler = async (event, context) => {
       };
     }
 
-    // Update transaction to completed
-    if (!isGuest && userId) {
-      await supabase
+    // FIXED: Update pending transaction to completed using stored ID
+    if (!isGuest && userId && transactionId) {
+      const { error: updateError } = await supabase
         .from('credit_transactions')
-        .update({ 
-          metadata: {
-            file_name: file.name,
-            pages: cost,
-            words: cleanedText.split(/\s+/).filter(w => w.length > 0).length,
-            model: config.ai.provider,
-            status: 'completed'
-          }
-        })
-        .eq('user_id', userId)
-        .eq('type', 'extraction')
-        .order('created_at', { ascending: false })
-        .limit(1);
+        .update({ status: 'completed' })
+        .eq('id', transactionId);
+
+      if (updateError) {
+        console.error('Failed to update transaction status:', updateError);
+      }
     }
 
     return {
@@ -388,7 +397,8 @@ exports.handler = async (event, context) => {
             estimatedPages: cost
           },
           aiProvider: config.ai.provider,
-          creditsUsed: isGuest ? 0 : cost
+          creditsUsed: isGuest ? 0 : cost,
+          newBalance: isGuest ? null : newBalance   // Uses the outer variable
         }
       })
     };

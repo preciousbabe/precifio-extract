@@ -1,9 +1,13 @@
+// netlify/functions/auth-signup.js
+
 const { createClient } = require('@supabase/supabase-js');
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 
 exports.handler = async (event, context) => {
+  context.callbackWaitsForEmptyEventLoop = false;
+
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
@@ -49,6 +53,20 @@ exports.handler = async (event, context) => {
       });
 
     if (profileError) throw profileError;
+
+    // Log the signup bonus
+    await supabase.from('credit_transactions').insert({
+      user_id: userId,
+      amount: 10,
+      type: 'bonus',
+      balance_after: 10,
+      status: 'completed',
+      metadata: {
+        reason: 'signup_bonus',
+        full_name: fullName,
+        company_name: companyName
+      }
+    });
 
     await fetch('https://api.resend.com/emails', {
       method: 'POST',

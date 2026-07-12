@@ -38,7 +38,6 @@ export function AuthProvider({ children }) {
       }
     } catch (err) {
       console.error('Auth error:', err);
-      // Token invalid — clear it
       localStorage.removeItem('precifio_token');
       setUser(null);
       setProfile(null);
@@ -60,7 +59,7 @@ export function AuthProvider({ children }) {
     }
   }, [fetchUser]);
 
-  // Listen for storage changes (in case another tab logs in/out)
+  // Listen for storage changes
   useEffect(() => {
     const handleStorage = (e) => {
       if (e.key === 'precifio_token') {
@@ -114,6 +113,23 @@ export function AuthProvider({ children }) {
     return { success: false, error: data.error };
   }, []);
 
+  const refreshProfile = useCallback(async () => {
+    const token = localStorage.getItem('precifio_token');
+    if (!token) return;
+    
+    try {
+      const res = await fetch('/.netlify/functions/auth-me', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (data.profile) {
+        setProfile(data.profile);
+      }
+    } catch (err) {
+      console.error('Refresh profile error:', err);
+    }
+  }, []);
+
   const logout = useCallback(() => {
     localStorage.removeItem('precifio_token');
     setUser(null);
@@ -139,12 +155,14 @@ export function AuthProvider({ children }) {
   const value = {
     user,
     profile,
+    setProfile,              // ← ✅ ADDED
     isGuest,
     loading,
     guestLimitReached,
     login,
     signup,
     logout,
+    refreshProfile,
     showAuthModal,
     setShowAuthModal,
     authModalMode,

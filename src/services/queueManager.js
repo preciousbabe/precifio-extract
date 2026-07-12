@@ -43,7 +43,10 @@ async function upload(url, file) {
 
   if (!response.ok) {
     const error = new Error(data.error || data.message || 'Extraction failed.');
+    error.status = response.status;
     error.code = data.code || null;
+    error.required = data.required || null;
+    error.available = data.available || null;
     error.isGuest = data.isGuest || false;
     throw error;
   }
@@ -63,6 +66,13 @@ class QueueManager {
     onProgress({ stage: 'processing', progress: 75 });
     onProgress({ stage: 'saving', progress: 95 });
     onProgress({ stage: 'completed', progress: 100 });
+
+    // ✅ Emit event for real-time credit update (no API call)
+    if (result.success && result.metadata?.creditsUsed > 0 && result.metadata?.newBalance !== undefined) {
+      window.dispatchEvent(new CustomEvent('creditsUpdated', {
+        detail: { newBalance: result.metadata.newBalance }
+      }));
+    }
 
     return result;
   }
