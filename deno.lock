@@ -11,6 +11,7 @@
   "workspace": {
     "packageJson": {
       "dependencies": [
+        "npm:@napi-rs/canvas@^1.0.2",
         "npm:@supabase/supabase-js@^2.110.1",
         "npm:@types/react-dom@^19.2.3",
         "npm:@types/react@^19.2.14",
@@ -19,12 +20,14 @@
         "npm:jsdom@24",
         "npm:jspdf-autotable@^5.0.8",
         "npm:jspdf@^4.2.1",
+        "npm:jszip@^3.10.1",
         "npm:openai@^4.47.1",
         "npm:parse-multipart@^1.0.4",
         "npm:pdf-parse@^1.1.1",
+        "npm:pdfjs-dist@^3.11.174",
         "npm:react-dom@^19.2.6",
         "npm:react@^19.2.6",
-        "npm:tesseract.js@5",
+        "npm:tesseract.js@^5.1.1",
         "npm:vite@^8.0.12",
         "npm:xlsx@~0.18.5",
         "npm:xml2js@~0.6.2"
