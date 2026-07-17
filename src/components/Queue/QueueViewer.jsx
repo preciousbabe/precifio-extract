@@ -414,23 +414,28 @@ const IconExcel = () => (
 // ─── Helpers ────────────────────────────────────────────────────────
 
 function shouldRenderAsTable(segment) {
-  const tableKeywords = /line|item|product|entry|detail|row|sku|qty|quantity/i;
-  if (tableKeywords.test(segment.segment_name)) return true;
-
   const fields = segment.fields || [];
-  if (fields.length < 2) return false;
+  const isPlainObject = (v) => v && typeof v === "object" && !Array.isArray(v);
 
-  const firstVal = fields[0].value;
-  if (firstVal && typeof firstVal === "object" && !Array.isArray(firstVal)) {
-    const keys = Object.keys(firstVal).sort().join(",");
-    return fields.every(f => {
-      const v = f.value;
-      return v && typeof v === "object" && !Array.isArray(v) && Object.keys(v).sort().join(",") === keys;
-    });
+  // Shape test: 2+ rows, every row a plain object, identical keys, >= 2 columns.
+  let shapeLooksTabular = false;
+  if (fields.length >= 2 && isPlainObject(fields[0].value)) {
+    const keys = Object.keys(fields[0].value);
+    if (keys.length >= 2) {
+      const sig = keys.slice().sort().join(",");
+      shapeLooksTabular = fields.every((f) => {
+        const v = f.value;
+        return isPlainObject(v) && Object.keys(v).sort().join(",") === sig;
+      });
+    }
   }
 
-  return false;
+  const t = (segment.segment_type || "").toLowerCase();
+  if (t === "table") return shapeLooksTabular; // trust "table" only if shape agrees
+  if (t === "detail") return false;
+  return shapeLooksTabular; // legacy data with no segment_type
 }
+
 
 function getTableColumns(fields) {
   const firstVal = fields[0].value;
@@ -666,6 +671,14 @@ export default function QueueViewer({ item, onClose, onExport }) {
   const extraction = item.result || {};
   const metadata = extraction.metadata || {};
   const segments = extraction.segments || [];
+
+  console.log(
+  JSON.stringify(
+    segments.find(s => s.segment_name === "Purchase Order Details").fields[0],
+    null,
+    2
+  )
+);
 
   // Lock body scroll when overlay is open
   useEffect(() => {

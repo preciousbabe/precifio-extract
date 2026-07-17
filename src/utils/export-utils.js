@@ -1,5 +1,9 @@
 // src/utils/export-utils.js
-// Export handlers — confidence stripped from all exports
+// Export handlers — confidence AND internal metadata stripped from all exports
+// Requires: npm install jspdf jspdf-autotable
+
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
 
 /**
  * Download a blob as a file
@@ -16,7 +20,7 @@ function downloadBlob(blob, filename) {
 }
 
 /**
- * Strip confidence from segments for clean export
+ * Strip confidence from segments for model export
  */
 function stripConfidence(segments) {
   return segments.map(seg => ({
@@ -34,43 +38,130 @@ function stripConfidence(segments) {
 }
 
 /**
- * Extract line items as array of objects (no confidence)
+ * Build the model export payload used by every export/share channel.
+ * Deliberately excludes internal metadata (extraction method, aiProvider,
+ * creditsUsed, newBalance, etc.) — only user-facing data is exported.
  */
-function extractLineItems(segments) {
-  const lineItemSeg = segments.find(s => /line|item|product|entry|detail/i.test(s.segment_name));
-  if (!lineItemSeg) return [];
-  return (lineItemSeg.fields || []).map(f => {
-    const { _confidence, confidence, ...cleanValue } = f.value || {};
-    return cleanValue;
-  });
+function buildExportModel(payload) {
+
+  const segments = stripConfidence(payload.segments || []);
+
+  const tables = [];
+  const details = [];
+
+  for (const segment of segments) {
+    if (isTableSegment(segment)) {
+      tables.push(segment);
+    } else {
+      details.push(segment);
+    }
+  }
+
+  return {
+    fileName: payload.fileName,
+    documentSummary: payload.documentSummary,
+    extractedAt: new Date().toISOString(),
+    segments,
+    tables,
+    details
+  };
+
+}
+
+function buildIntegrationExport(payload, format) {
+  const model = buildExportModel(payload);
+
+  return {
+    format,
+    generatedBy: "Precifio Extract",
+    generatedAt: model.extractedAt,
+    fileName: model.fileName,
+    documentSummary: model.documentSummary,
+    tables: model.tables,
+    details: model.details
+  };
+}
+
+
+
+
+function getTableHeaders(table) {
+  if (!table?.fields?.length) {
+    return [];
+  }
+
+  const firstRow = table.fields[0]?.value;
+
+  if (!firstRow || typeof firstRow !== "object") {
+    return [];
+  }
+
+  return Object.keys(firstRow);
+}
+
+function getTableRows(table) {
+  return (table.fields || []).map(field => field.value || {});
+}
+
+
+/**
+ * Returns true if a segment represents a table.
+ */
+function isTableSegment(segment) {
+  const fields = segment?.fields || [];
+
+  return (
+    fields.length > 1 &&
+    fields.every(field =>
+      field &&
+      field.value &&
+      typeof field.value === "object" &&
+      !Array.isArray(field.value)
+    )
+  );
+}
+
+
+/**
+ * Returns all non-table segments.
+ */
+function getScalarSegments(segments) {
+  return (segments || []).filter(seg => !isTableSegment(seg));
 }
 
 /**
- * Extract scalar fields from segments (no confidence)
+ * Flatten all scalar segments.
  */
-function extractScalarFields(segments) {
-  const scalars = {};
-  for (const seg of segments) {
+function getScalarFields(segments) {
+
+  const rows = [];
+
+  for (const seg of getScalarSegments(segments)) {
+
     for (const field of seg.fields || []) {
-      if (typeof field.value === "string" || typeof field.value === "number") {
-        const key = field.label.toLowerCase().replace(/\s+/g, "_");
-        scalars[key] = field.value;
-      }
+
+      rows.push({
+
+        segment: seg.segment_name,
+
+        label: field.label,
+
+        value: field.value
+
+      });
+
     }
+
   }
-  return scalars;
+
+  return rows;
+
 }
 
 // ─── JSON ─────────────────────────────────────────────────────────
 
 export function exportAsJSON(payload) {
-  const data = {
-    fileName: payload.fileName,
-    documentSummary: payload.documentSummary,
-    extractedAt: new Date().toISOString(),
-    segments: stripConfidence(payload.segments),
-    metadata: payload.metadata
-  };
+  const data = buildExportModel(payload);
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
   downloadBlob(blob, `${payload.fileName.replace(/\.[^.]+$/, "")}_extracted.json`);
 }
@@ -78,40 +169,55 @@ export function exportAsJSON(payload) {
 // ─── CSV ──────────────────────────────────────────────────────────
 
 export function exportAsCSV(payload) {
-  const lineItems = extractLineItems(payload.segments);
+ const model = buildExportModel(payload);
+ const tableSegments = model.tables;
+ const scalarFields = getScalarFields(model.details);
   let csv = "";
 
-  if (lineItems.length > 0) {
-    // Export line items as primary table — NO confidence column
-    const headers = Object.keys(lineItems[0]);
-    csv += headers.map(h => `"${h}"`).join(",") + "\n";
-    for (const row of lineItems) {
-      const vals = headers.map(h => {
-        const v = row[h];
-        if (v === null || v === undefined) return '""';
-        const str = String(v).replace(/"/g, '""');
-        return `"${str}"`;
-      });
-      csv += vals.join(",") + "\n";
-    }
+  if (tableSegments.length) {
+    for (const table of tableSegments) {
+
+  csv += `"${table.segment_name}"\n`;
+
+  const headers = getTableHeaders(table);
+
+  csv += headers.map(h => `"${h}"`).join(",") + "\n";
+
+  for (const row of getTableRows(table)) {
+
+    csv += headers
+      .map(col => {
+        const v = row[col];
+
+        if (v === null || v === undefined) {
+          return `""`;
+        }
+
+        return `"${String(v).replace(/"/g,'""')}"`;
+
+      })
+      .join(",");
+
+    csv += "\n";
+
+  }
+
+  csv += "\n";
+
+}
   } else {
-    // Fallback: export all fields as flat CSV — NO confidence
-    const flat = {};
-    for (const seg of payload.segments || []) {
-      const segName = seg.segment_name || "unknown";
-      if (!flat[segName]) flat[segName] = {};
-      for (const field of seg.fields || []) {
-        flat[segName][field.label] = field.value;
-      }
-    }
-    for (const [segName, fields] of Object.entries(flat)) {
-      csv += '"Segment","Field","Value"\n';
-      for (const [label, value] of Object.entries(fields)) {
-        const v = String(value).replace(/"/g, '""');
-        csv += `"${segName}","${label}","${v}"\n`;
-      }
-      csv += "\n";
-    }
+    if (scalarFields.length) {
+
+  csv += `"Details"\n`;
+  csv += `"Segment","Field","Value"\n`;
+
+  for (const row of scalarFields) {
+
+    csv += `"${row.segment}","${row.label}","${String(row.value).replace(/"/g,'""')}"\n`;
+
+  }
+
+}
   }
 
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -121,7 +227,9 @@ export function exportAsCSV(payload) {
 // ─── Excel (.xlsx) ───────────────────────────────────────────────
 
 export function exportAsExcel(payload) {
-  const lineItems = extractLineItems(payload.segments);
+ const model = buildExportModel(payload);
+const tableSegments = model.tables;
+const scalarFields = getScalarFields(model.details);
 
   let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
 <head><meta charset="utf-8"><style>td,th{border:1px solid #ccc;padding:6px;font-family:Arial;font-size:12px}th{background:#f0f0f0;font-weight:bold}</style></head>
@@ -131,21 +239,94 @@ export function exportAsExcel(payload) {
   html += `<tr><td colspan="10" style="background:#f9fafb">${escapeHtml(payload.documentSummary || "")} | Extracted: ${new Date().toLocaleString()}</td></tr>`;
   html += `<tr><td colspan="10"></td></tr>`;
 
-  if (lineItems.length > 0) {
-    const headers = Object.keys(lineItems[0]);
-    html += `<tr>` + headers.map(h => `<th>${escapeHtml(h)}</th>`).join("") + `</tr>`;
-    for (const row of lineItems) {
-      html += `<tr>` + headers.map(h => `<td>${escapeHtml(String(row[h] || ""))}</td>`).join("") + `</tr>`;
-    }
-  } else {
-    html += `<tr><th>Segment</th><th>Field</th><th>Value</th></tr>`;
-    for (const seg of stripConfidence(payload.segments || [])) {
-      for (const field of seg.fields || []) {
-        const val = typeof field.value === "object" ? JSON.stringify(field.value) : String(field.value);
-        html += `<tr><td>${escapeHtml(seg.segment_name)}</td><td>${escapeHtml(field.label)}</td><td>${escapeHtml(val)}</td></tr>`;
-      }
-    }
+  //
+// Export every table exactly as GPT produced it
+//
+
+for (const table of tableSegments) {
+
+  html += `
+    <tr>
+      <th colspan="20"
+          style="
+            background:#2563eb;
+            color:white;
+            font-size:13px;
+            text-align:left;
+            padding:8px;
+          ">
+        ${escapeHtml(table.segment_name)}
+      </th>
+    </tr>
+  `;
+
+ const headers = getTableHeaders(table);
+
+html += "<tr>";
+
+for (const header of headers) {
+    html += `<th>${escapeHtml(header)}</th>`;
   }
+
+  html += "</tr>";
+
+  for (const row of getTableRows(table)) {
+
+    html += "<tr>";
+
+    for (const header of headers) {
+
+      html += `<td>${
+        escapeHtml(String(row[header] ?? ""))
+      }</td>`;
+
+    }
+
+    html += "</tr>";
+
+  }
+
+  html += `<tr><td colspan="20"></td></tr>`;
+
+}
+
+if (scalarFields.length) {
+
+  html += `
+    <tr>
+      <th colspan="3"
+          style="
+            background:#111827;
+            color:white;
+            text-align:left;
+            padding:8px;
+          ">
+        Details
+      </th>
+    </tr>
+  `;
+
+  html += `
+    <tr>
+      <th>Segment</th>
+      <th>Field</th>
+      <th>Value</th>
+    </tr>
+  `;
+
+  for (const row of scalarFields) {
+
+    html += `
+      <tr>
+        <td>${escapeHtml(row.segment)}</td>
+        <td>${escapeHtml(row.label)}</td>
+        <td>${escapeHtml(String(row.value))}</td>
+      </tr>
+    `;
+
+  }
+
+}
 
   html += `</table></body></html>`;
 
@@ -153,189 +334,331 @@ export function exportAsExcel(payload) {
   downloadBlob(blob, `${payload.fileName.replace(/\.[^.]+$/, "")}_extracted.xls`);
 }
 
-// ─── PDF ──────────────────────────────────────────────────────────
+// ─── PDF (real file download via jsPDF) ───────────────────────────
 
-export async function exportAsPDF(payload) {
-  const printWindow = window.open("", "_blank");
-  if (!printWindow) {
-    alert("Please allow popups to generate PDF");
-    return;
+function formatPdfCell(value) {
+  if (value === null || value === undefined) return "";
+
+  if (typeof value === "object") {
+    return JSON.stringify(value);
   }
 
-  const html = generatePDFHTML(payload);
-  printWindow.document.write(html);
-  printWindow.document.close();
-  printWindow.focus();
+  return String(value);
 }
 
-function generatePDFHTML(payload) {
-  const segments = stripConfidence(payload.segments || []);
-  let body = "";
+export function exportAsPDF(payload) {
 
-  for (const seg of segments) {
-    body += `<h2>${escapeHtml(seg.segment_name)}</h2>`;
-    const isTable = seg.fields?.length > 1 && seg.fields.every(f => f.value && typeof f.value === "object" && !Array.isArray(f.value));
+  const model = buildExportModel(payload);
 
-    if (isTable) {
-      const cols = Object.keys(seg.fields[0].value);
-      body += `<table border="1" cellpadding="8" cellspacing="0" style="width:100%;border-collapse:collapse;font-family:sans-serif;font-size:12px">`;
-      body += `<thead style="background:#f3f4f6"><tr>` + cols.map(c => `<th style="text-align:left;text-transform:capitalize">${escapeHtml(c)}</th>`).join("") + `</tr></thead>`;
-      body += `<tbody>`;
-      for (const f of seg.fields) {
-        body += `<tr>` + cols.map(c => `<td>${escapeHtml(String(f.value[c] || ""))}</td>`).join("") + `</tr>`;
-      }
-      body += `</tbody></table>`;
-    } else {
-      body += `<table border="1" cellpadding="8" cellspacing="0" style="width:100%;border-collapse:collapse;font-family:sans-serif;font-size:12px">`;
-      for (const f of seg.fields || []) {
-        body += `<tr><td style="width:30%;background:#f9fafb;font-weight:600">${escapeHtml(f.label)}</td><td>${escapeHtml(String(f.value))}</td></tr>`;
-      }
-      body += `</table>`;
+  const doc = new jsPDF({
+    unit: "pt",
+    format: "a4"
+  });
+
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const margin = 40;
+
+  let y = margin;
+
+  // Title
+
+  doc.setFontSize(18);
+  doc.setTextColor(0);
+
+  doc.text(
+    model.fileName || "Extraction",
+    margin,
+    y
+  );
+
+  y += 24;
+
+  // Summary
+
+  if (model.documentSummary) {
+
+    doc.setFontSize(10);
+    doc.setTextColor(110);
+
+    const lines = doc.splitTextToSize(
+      model.documentSummary,
+      pageWidth - margin * 2
+    );
+
+    doc.text(lines, margin, y);
+
+    y += lines.length * 13 + 8;
+
+  }
+
+  // Timestamp
+
+  doc.setFontSize(9);
+  doc.setTextColor(150);
+
+  doc.text(
+    `Extracted on ${new Date(model.extractedAt).toLocaleString()}`,
+    margin,
+    y
+  );
+
+  y += 22;
+
+  doc.setTextColor(0);
+
+  // Render every segment exactly as GPT produced it
+
+  for (const segment of model.segments) {
+
+    if (y > 700) {
+      doc.addPage();
+      y = margin;
     }
-    body += `<br/>`;
+
+    doc.setFontSize(13);
+
+    doc.text(
+      segment.segment_name || "Segment",
+      margin,
+      y
+    );
+
+    y += 8;
+
+    if (isTableSegment(segment)) {
+
+      const headers = getTableHeaders(segment);
+
+      const rows = getTableRows(segment);
+
+      autoTable(doc, {
+
+        startY: y,
+
+        head: [headers],
+
+        body: rows.map(row =>
+          headers.map(header =>
+            formatPdfCell(row[header])
+          )
+        ),
+
+        margin: {
+          left: margin,
+          right: margin
+        },
+
+        styles: {
+          fontSize: 9,
+          cellPadding: 6
+        },
+
+        headStyles: {
+          fillColor: [243, 244, 246],
+          textColor: 0,
+          fontStyle: "bold"
+        },
+
+        pageBreak: "auto",
+        rowPageBreak: "auto"
+
+      });
+
+    } else {
+
+      autoTable(doc, {
+
+        startY: y,
+
+        body: (segment.fields || []).map(field => [
+
+          field.label,
+
+          formatPdfCell(field.value)
+
+        ]),
+
+        margin: {
+          left: margin,
+          right: margin
+        },
+
+        styles: {
+          fontSize: 9,
+          cellPadding: 6
+        },
+
+        columnStyles: {
+          0: {
+            cellWidth: 180,
+            fontStyle: "bold"
+          }
+        },
+
+        pageBreak: "auto",
+        rowPageBreak: "auto"
+
+      });
+
+    }
+
+    y = (doc.lastAutoTable?.finalY || y) + 24;
+
   }
 
-  return `
-    <!DOCTYPE html>
-    <html>
-    <head><title>${escapeHtml(payload.fileName)} — Extraction</title></head>
-    <body style="font-family:sans-serif;padding:40px;max-width:800px;margin:0 auto">
-      <h1>${escapeHtml(payload.fileName)}</h1>
-      <p style="color:#6b7280">${escapeHtml(payload.documentSummary || "")}</p>
-      <p style="color:#9ca3af;font-size:12px">Extracted on ${new Date().toLocaleString()}</p>
-      <hr style="margin:20px 0;border:none;border-top:1px solid #e5e7eb"/>
-      ${body}
-      <script>window.onload = () => { setTimeout(() => window.print(), 300); }</script>
-    </body>
-    </html>
-  `;
+  const base =
+    (model.fileName || "document")
+      .replace(/\.[^.]+$/, "");
+
+  doc.save(`${base}_extracted.pdf`);
+
 }
 
-function escapeHtml(str) {
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
 
 // ─── Xero ─────────────────────────────────────────────────────────
 
 export function exportAsXero(payload) {
-  const lineItems = extractLineItems(payload.segments);
-  const scalars = extractScalarFields(payload.segments);
 
-  const xeroInvoice = {
-    Type: "ACCPAY",
-    Contact: {
-      Name: scalars.company_name || scalars.vendor_name || scalars.supplier_name || "Unknown Vendor",
-      EmailAddress: scalars.email || "",
-      TaxNumber: scalars.tax_id || scalars.vat_number || ""
-    },
-    Date: formatDateForXero(scalars.invoice_date || scalars.date),
-    DueDate: formatDateForXero(scalars.due_date),
-    InvoiceNumber: scalars.invoice_number || scalars.bill_number || "",
-    Reference: scalars.po_number || scalars.reference || "",
-    CurrencyCode: extractCurrencyCode(scalars.currency),
-    Status: "DRAFT",
-    LineAmountTypes: "Inclusive",
-    LineItems: lineItems.map((item, idx) => ({
-      Description: item.description || item.item || "",
-      Quantity: parseFloat(item.qty || item.quantity || 1),
-      UnitAmount: parseMoney(item.unit_price),
-      TaxType: mapTaxType(item.tax),
-      AccountCode: item.account_code || item.gl_code || "200",
-      LineItemID: item.sku || item.line_number || `line-${idx + 1}`
-    })),
-    SubTotal: parseMoney(scalars.subtotal),
-    TotalTax: parseMoney(scalars.tax),
-    Total: parseMoney(scalars.amount_due || scalars.total)
-  };
+  const exportData = buildIntegrationExport(
+    payload,
+    "xero"
+  );
 
-  const blob = new Blob([JSON.stringify(xeroInvoice, null, 2)], { type: "application/json" });
-  downloadBlob(blob, `${payload.fileName.replace(/\.[^.]+$/, "")}_xero.json`);
+  const blob = new Blob(
+    [JSON.stringify(exportData, null, 2)],
+    { type: "application/json" }
+  );
+
+  downloadBlob(
+    blob,
+    `${payload.fileName.replace(/\.[^.]+$/, "")}_xero.json`
+  );
+
 }
+
 
 // ─── QuickBooks ────────────────────────────────────────────────────
 
 export function exportAsQuickBooks(payload) {
-  const lineItems = extractLineItems(payload.segments);
-  const scalars = extractScalarFields(payload.segments);
 
-  const qbInvoice = {
-    TxnDate: formatDateForXero(scalars.invoice_date || scalars.date),
-    DueDate: formatDateForXero(scalars.due_date),
-    DocNumber: scalars.invoice_number || scalars.bill_number || "",
-    PrivateNote: payload.documentSummary || "",
-    CustomerRef: {
-      value: scalars.company_name || scalars.customer_name || "Unknown",
-      name: scalars.company_name || scalars.customer_name || "Unknown"
-    },
-    VendorRef: {
-      value: scalars.vendor_name || scalars.supplier_name || scalars.company_name || "Unknown",
-      name: scalars.vendor_name || scalars.supplier_name || scalars.company_name || "Unknown"
-    },
-    CurrencyRef: { value: extractCurrencyCode(scalars.currency) },
-    Line: lineItems.map((item, idx) => ({
-      DetailType: "SalesItemLineDetail",
-      Amount: parseMoney(item.total),
-      Description: item.description || item.item || "",
-      SalesItemLineDetail: {
-        Qty: parseFloat(item.qty || item.quantity || 1),
-        UnitPrice: parseMoney(item.unit_price),
-        TaxCodeRef: { value: mapTaxType(item.tax) }
-      },
-      LineNum: idx + 1
-    })),
-    TotalAmt: parseMoney(scalars.amount_due || scalars.total),
-    Balance: parseMoney(scalars.balance_due || scalars.amount_due || scalars.total),
-    CustomField: [
-      { DefinitionId: "1", Name: "Extracted By", Type: "StringType", StringValue: "Precifio Extract" },
-      { DefinitionId: "2", Name: "PO Number", Type: "StringType", StringValue: scalars.po_number || "" }
-    ]
-  };
+  const exportData = buildIntegrationExport(
+    payload,
+    "quickbooks"
+  );
 
-  const blob = new Blob([JSON.stringify(qbInvoice, null, 2)], { type: "application/json" });
-  downloadBlob(blob, `${payload.fileName.replace(/\.[^.]+$/, "")}_quickbooks.json`);
+  const blob = new Blob(
+    [JSON.stringify(exportData, null, 2)],
+    { type: "application/json" }
+  );
+
+  downloadBlob(
+    blob,
+    `${payload.fileName.replace(/\.[^.]+$/, "")}_quickbooks.json`
+  );
+
 }
 
-// ─── Webhook ──────────────────────────────────────────────────────
+
+// ─── Webhook / Slack ──────────────────────────────────────────────
+
+/**
+ * Resolve an integration URL: env var → localStorage → prompt (then persist).
+ * Returns null if the user cancels or enters an invalid URL.
+ */
+function resolveIntegrationUrl({ envValue, storageKey, promptMessage }) {
+  let url = envValue || localStorage.getItem(storageKey);
+  if (!url) {
+    const entered = prompt(promptMessage);
+    if (!entered) return null;
+    url = entered.trim();
+    if (!/^https?:\/\//i.test(url)) {
+      alert("Invalid URL — it must start with http:// or https://");
+      return null;
+    }
+    localStorage.setItem(storageKey, url);
+  }
+  return url;
+}
 
 export async function sendToWebhook(payload, options = {}) {
-  const webhookUrl = process.env.REACT_APP_WEBHOOK_URL || localStorage.getItem("precifio_webhook_url");
+  const isSlack = options.type === "slack";
+  const model = buildExportModel(payload);
 
-  if (!webhookUrl) {
-    const url = prompt("Enter your webhook URL:");
-    if (!url) return;
-    localStorage.setItem("precifio_webhook_url", url);
+  const url = isSlack
+    ? resolveIntegrationUrl({
+        envValue: process.env.REACT_APP_SLACK_WEBHOOK_URL,
+        storageKey: "precifio_slack_webhook_url",
+        promptMessage: "Enter your Slack incoming webhook URL:"
+      })
+    : resolveIntegrationUrl({
+        envValue: process.env.REACT_APP_WEBHOOK_URL,
+        storageKey: "precifio_webhook_url",
+        promptMessage: "Enter your webhook URL:"
+      });
+
+  if (!url) return;
+
+  if (isSlack) {
+    return sendSlackMessage(url, model);
   }
 
-  const finalUrl = webhookUrl || localStorage.getItem("precifio_webhook_url");
-
   const body = {
-    event: options.type === "slack" ? "extraction.slack" : "extraction.completed",
+    event: "extraction.completed",
     timestamp: new Date().toISOString(),
-    payload: {
-      fileName: payload.fileName,
-      documentSummary: payload.documentSummary,
-      segments: stripConfidence(payload.segments),
-      metadata: payload.metadata
-    }
+    payload: model
   };
 
   try {
-    const res = await fetch(finalUrl, {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      signal: controller.signal
     });
+    clearTimeout(timeout);
 
-    if (!res.ok) throw new Error(`Webhook returned ${res.status}`);
-    alert(options.type === "slack" ? "Sent to Slack/Teams!" : "Webhook delivered successfully!");
+    if (!res.ok) throw new Error(`Webhook returned HTTP ${res.status}`);
+    alert("Webhook delivered successfully!");
   } catch (err) {
     console.error("Webhook failed:", err);
-    alert(`Webhook failed: ${err.message}`);
+    const msg = err.name === "AbortError" ? "request timed out after 15s" : err.message;
+    alert(`Webhook failed: ${msg}\n\nTip: if this is a CORS error, route the request through your backend (REACT_APP_API_URL) instead of calling the webhook directly from the browser.`);
+  }
+}
+
+/**
+ * Slack incoming webhooks expect a { text } body and block CORS preflight,
+ * so we send a "simple request" (text/plain, no-cors). The message is
+ * delivered, but the response is opaque — we can't read Slack's status code.
+ */
+async function sendSlackMessage(url, model) {
+  const lines = [];
+  for (const seg of model.segments) {
+    lines.push(`*${seg.segment_name}*`);
+    for (const f of seg.fields || []) {
+      const val = typeof f.value === "object" ? JSON.stringify(f.value) : String(f.value ?? "");
+      lines.push(`• ${f.label}: ${val}`);
+    }
+  }
+
+  let text = `:page_facing_up: *Extraction completed:* ${model.fileName}\n`;
+  if (model.documentSummary) text += `_${model.documentSummary}_\n\n`;
+  text += lines.join("\n");
+  if (text.length > 3500) text = text.slice(0, 3500) + "\n…(truncated)";
+
+  try {
+    await fetch(url, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ text })
+    });
+    alert("Sent to Slack! (If nothing appears in the channel, double-check the webhook URL.)");
+  } catch (err) {
+    console.error("Slack send failed:", err);
+    alert(`Slack send failed: ${err.message}`);
   }
 }
 
@@ -345,43 +668,60 @@ export async function sendEmail(payload) {
   const email = prompt("Enter recipient email address:");
   if (!email) return;
 
-  const subject = encodeURIComponent(`Document Extraction: ${payload.fileName}`);
-  const body = encodeURIComponent(
-    `Document extraction results for: ${payload.fileName}\n\n` +
-    `Summary: ${payload.documentSummary || "N/A"}\n\n` +
-    `Extracted at: ${new Date().toLocaleString()}\n\n` +
-    `---\n\n` +
-    JSON.stringify(stripConfidence(payload.segments), null, 2)
-  );
-
-  try {
-    const apiUrl = process.env.REACT_APP_API_URL || "";
-    if (apiUrl) {
-      const res = await fetch(`${apiUrl}/send-email`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to: email, payload: { ...payload, segments: stripConfidence(payload.segments) } })
-      });
-      if (res.ok) {
-        alert("Email sent successfully!");
-        return;
-      }
-    }
-  } catch (e) {
-    // Fallback to mailto
+  const to = email.trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
+    alert("Please enter a valid email address.");
+    return;
   }
 
-  window.location.href = `mailto:${email}?subject=${subject}&body=${body}`;
+  const model = buildExportModel(payload);
+  const subject = `Document Extraction: ${model.fileName}`;
+
+  try {
+  const res = await fetch("/.netlify/functions/send-email", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      to,
+      subject,
+      payload: model
+    })
+  });
+
+  const result = await res.json();
+
+  if (!res.ok) {
+    throw new Error(result.error || "Unable to send email.");
+  }
+
+  alert("Email sent successfully!");
+  return;
+
+} catch (err) {
+  console.error(err);
+}
+
+
+  const blob = new Blob([JSON.stringify(model, null, 2)], { type: "application/json" });
+  downloadBlob(blob, `${model.fileName.replace(/\.[^.]+$/, "")}_extracted.json`);
+
+  const mailSubject = encodeURIComponent(subject);
+  const mailBody = encodeURIComponent(
+    `Document extraction results for: ${model.fileName}\n\n` +
+    `Summary: ${model.documentSummary || "N/A"}\n` +
+    `Extracted at: ${new Date().toLocaleString()}\n\n` +
+    `The full extraction JSON has been downloaded to your computer — please attach it to this email.`
+  );
+
+  window.location.href = `mailto:${to}?subject=${mailSubject}&body=${mailBody}`;
 }
 
 // ─── Clipboard ────────────────────────────────────────────────────
 
 export async function copyToClipboard(payload) {
-  const text = JSON.stringify({
-    fileName: payload.fileName,
-    documentSummary: payload.documentSummary,
-    segments: stripConfidence(payload.segments)
-  }, null, 2);
+  const text = JSON.stringify(buildExportModel(payload), null, 2)
 
   try {
     await navigator.clipboard.writeText(text);
@@ -397,32 +737,12 @@ export async function copyToClipboard(payload) {
 
 // ─── Helpers ──────────────────────────────────────────────────────
 
-function formatDateForXero(dateStr) {
-  if (!dateStr) return new Date().toISOString().split("T")[0];
-  const d = new Date(dateStr);
-  if (!isNaN(d)) return d.toISOString().split("T")[0];
-  return dateStr;
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
-function extractCurrencyCode(currencyStr) {
-  if (!currencyStr) return "USD";
-  const match = String(currencyStr).match(/[A-Z]{3}/);
-  return match ? match[0] : "USD";
-}
-
-function parseMoney(val) {
-  if (!val) return 0;
-  const cleaned = String(val).replace(/[^\d.-]/g, "");
-  const num = parseFloat(cleaned);
-  return isNaN(num) ? 0 : num;
-}
-
-function mapTaxType(taxStr) {
-  if (!taxStr) return "NONE";
-  const pct = parseFloat(String(taxStr).replace(/[^\d.]/g, ""));
-  if (pct === 0) return "NONE";
-  if (pct <= 5) return "TAX001";
-  if (pct <= 10) return "TAX002";
-  if (pct <= 20) return "TAX003";
-  return "TAX001";
-}

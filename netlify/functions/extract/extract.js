@@ -327,7 +327,9 @@ exports.handler = async (event, context) => {
     }
 
     // Normalize segments for tabular detection
-    const normalizedSegments = normalizeSegments(extractedData.segments || []);
+    const segments = Array.isArray(extractedData.segments)
+  ? extractedData.segments
+  : [];
 
     // Update transaction to completed
     if (!isGuest && userId && transactionId) {
@@ -350,7 +352,7 @@ exports.handler = async (event, context) => {
         fileName: file.name,
         fileType: validation.mimeType,
         documentSummary: extractedData.document_summary,
-        segments: normalizedSegments,
+        segments,
         metadata: {
           extraction: {
             ...extraction.metadata,
