@@ -3,7 +3,17 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { exportAsJSON, exportAsCSV, exportAsExcel, exportAsPDF, exportAsXero, exportAsQuickBooks, sendToWebhook, sendEmail, copyToClipboard } from "../../utils/export-utils";
+import { supabase } from "../../config/supabase";
+import {
+  exportAsJSON,
+  exportAsCSV,
+  exportAsExcel,
+  exportAsPDF,
+  sendToIntegration,
+  sendEmail,
+  copyToClipboard
+} from "../../utils/export-utils";
+
 
 // ─── Inline Styles ─────────────────────────────────────────────────
 const styles = {
@@ -171,9 +181,6 @@ const styles = {
   dataTable: {
     width: "100%",
     borderCollapse: "collapse",
-    display: "block",
-    overflowX: "auto",
-    whiteSpace: "nowrap",
   },
 
   tableHead: {
@@ -479,40 +486,94 @@ function DataTable({ fields }) {
   const numberCols = ["qty", "quantity", "amount", "count", "line_number"];
 
   return (
+  <div
+    style={{
+      width: "100%",
+      overflowX: "auto",
+      WebkitOverflowScrolling: "touch",
+    }}
+  >
     <table style={styles.dataTable}>
       <thead>
         <tr>
           {columns.map(col => (
-            <th key={col} style={{ ...styles.tableTh, textAlign: moneyCols.includes(col) || numberCols.includes(col) ? "center" : "left" }}>
+            <th
+              key={col}
+              style={{
+                ...styles.tableTh,
+                textAlign:
+                  moneyCols.includes(col) || numberCols.includes(col)
+                    ? "center"
+                    : "left",
+              }}
+            >
               {formatLabel(col)}
             </th>
           ))}
-          <th style={{ ...styles.tableTh, textAlign: "center" }}>Conf.</th>
+          <th
+            style={{
+              ...styles.tableTh,
+              textAlign: "center",
+            }}
+          >
+            Conf.
+          </th>
         </tr>
       </thead>
+
       <tbody>
         {fields.map((field, idx) => {
           const row = field.value || {};
           const pct = Math.round((field.confidence || 0) * 100);
+
           return (
-            <tr key={idx} style={idx % 2 === 1 ? { background: "#fafafa" } : {}}>
+            <tr
+              key={idx}
+              style={idx % 2 === 1 ? { background: "#fafafa" } : {}}
+            >
               {columns.map(col => {
                 const v = row[col];
                 const isMoney = moneyCols.includes(col);
                 const isNum = numberCols.includes(col);
+
                 return (
-                  <td key={col} style={{ ...styles.tableTd, textAlign: isMoney || isNum ? "right" : "left", fontWeight: isMoney ? 600 : 400 }}>
+                  <td
+                    key={col}
+                    style={{
+                      ...styles.tableTd,
+                      textAlign:
+                        isMoney || isNum ? "right" : "left",
+                      fontWeight: isMoney ? 600 : 400,
+                    }}
+                  >
                     {renderValue(v)}
                   </td>
                 );
               })}
-              <td style={{ ...styles.tableTd, textAlign: "center", fontSize: "12px", fontWeight: 700, color: pct >= 90 ? "#16a34a" : pct >= 70 ? "#d97706" : "#dc2626" }}>{pct}%</td>
+
+              <td
+                style={{
+                  ...styles.tableTd,
+                  textAlign: "center",
+                  fontSize: "12px",
+                  fontWeight: 700,
+                  color:
+                    pct >= 90
+                      ? "#16a34a"
+                      : pct >= 70
+                      ? "#d97706"
+                      : "#dc2626",
+                }}
+              >
+                {pct}%
+              </td>
             </tr>
           );
         })}
       </tbody>
     </table>
-  );
+  </div>
+);
 }
 
 function renderValue(value) {
@@ -548,6 +609,7 @@ function renderValue(value) {
   return String(value);
 }
 
+
 // ─── Export Dropdown ──────────────────────────────────────────────
 
 function ExportDropdown({ item, segments, onExport }) {
@@ -576,16 +638,45 @@ function ExportDropdown({ item, segments, onExport }) {
         metadata: item.result?.metadata
       };
 
+      const connection = item.connection || null;
+
       switch (format) {
         case "json": exportAsJSON(payload); break;
         case "csv": exportAsCSV(payload); break;
         case "excel": exportAsExcel(payload); break;
         case "pdf": await exportAsPDF(payload); break;
-        case "xero": exportAsXero(payload); break;
-        case "quickbooks": exportAsQuickBooks(payload); break;
-        case "webhook": await sendToWebhook(payload); break;
-        case "email": await sendEmail(payload); break;
-        case "slack": await sendToWebhook(payload, { type: "slack" }); break;
+      case "xero":
+case "quickbooks":
+case "google-drive":
+case "dropbox":
+case "onedrive":
+case "webhook":
+case "slack":
+
+console.log("ITEM", item);
+console.log("USER ID", item.user_id, item.userId);
+const {
+  data: { user }
+} = await supabase.auth.getUser();
+
+if (!user) {
+  alert("Please sign in to use integrations.");
+  return;
+}
+
+await sendToIntegration({
+
+  provider: format,
+
+  payload,
+
+  userId: user.id,
+
+  exportFormat: "pdf"
+
+});
+
+  break;
         case "clipboard":
           await copyToClipboard(payload);
           setCopied(true);
@@ -641,6 +732,37 @@ function ExportDropdown({ item, segments, onExport }) {
             <IconQuickBooks /> QuickBooks (invoice JSON)
           </button>
           <div style={styles.exportDivider} />
+
+<div style={styles.exportHeader}>
+  Cloud integrations
+</div>
+
+
+<button
+ style={styles.exportOption}
+ onClick={() => handleExport("google-drive")}
+>
+  Google Drive
+</button>
+
+
+<button
+ style={styles.exportOption}
+ onClick={() => handleExport("dropbox")}
+>
+  Dropbox
+</button>
+
+
+<button
+ style={styles.exportOption}
+ onClick={() => handleExport("onedrive")}
+>
+  OneDrive
+</button>
+
+
+          <div style={styles.exportDivider} />
           <div style={styles.exportHeader}>Send to system</div>
           <button style={styles.exportOption} onClick={() => handleExport("webhook")} onMouseEnter={(e) => e.currentTarget.style.background = "#f3f4f6"} onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
             <IconWebhook /> Webhook (API endpoint)
@@ -663,6 +785,8 @@ function ExportDropdown({ item, segments, onExport }) {
   );
 }
 
+
+
 // ─── Main Component ───────────────────────────────────────────────
 
 export default function QueueViewer({ item, onClose, onExport }) {
@@ -672,13 +796,6 @@ export default function QueueViewer({ item, onClose, onExport }) {
   const metadata = extraction.metadata || {};
   const segments = extraction.segments || [];
 
-  console.log(
-  JSON.stringify(
-    segments.find(s => s.segment_name === "Purchase Order Details").fields[0],
-    null,
-    2
-  )
-);
 
   // Lock body scroll when overlay is open
   useEffect(() => {

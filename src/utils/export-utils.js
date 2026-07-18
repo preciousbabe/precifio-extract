@@ -4,6 +4,7 @@
 
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+const INTEGRATION_API = "/.netlify/functions";
 
 /**
  * Download a blob as a file
@@ -515,151 +516,185 @@ export function exportAsPDF(payload) {
 }
 
 
-// ─── Xero ─────────────────────────────────────────────────────────
+function resolveIntegrationUrl({
+  envValue,
+  storageKey,
+  promptMessage
+}) {
 
-export function exportAsXero(payload) {
+  let url =
+    envValue ||
+    localStorage.getItem(storageKey);
 
-  const exportData = buildIntegrationExport(
-    payload,
-    "xero"
-  );
-
-  const blob = new Blob(
-    [JSON.stringify(exportData, null, 2)],
-    { type: "application/json" }
-  );
-
-  downloadBlob(
-    blob,
-    `${payload.fileName.replace(/\.[^.]+$/, "")}_xero.json`
-  );
-
-}
-
-
-// ─── QuickBooks ────────────────────────────────────────────────────
-
-export function exportAsQuickBooks(payload) {
-
-  const exportData = buildIntegrationExport(
-    payload,
-    "quickbooks"
-  );
-
-  const blob = new Blob(
-    [JSON.stringify(exportData, null, 2)],
-    { type: "application/json" }
-  );
-
-  downloadBlob(
-    blob,
-    `${payload.fileName.replace(/\.[^.]+$/, "")}_quickbooks.json`
-  );
-
-}
-
-
-// ─── Webhook / Slack ──────────────────────────────────────────────
-
-/**
- * Resolve an integration URL: env var → localStorage → prompt (then persist).
- * Returns null if the user cancels or enters an invalid URL.
- */
-function resolveIntegrationUrl({ envValue, storageKey, promptMessage }) {
-  let url = envValue || localStorage.getItem(storageKey);
   if (!url) {
+
     const entered = prompt(promptMessage);
-    if (!entered) return null;
-    url = entered.trim();
-    if (!/^https?:\/\//i.test(url)) {
-      alert("Invalid URL — it must start with http:// or https://");
+
+    if (!entered) {
       return null;
     }
-    localStorage.setItem(storageKey, url);
+
+    url = entered.trim();
+
+    if (!/^https?:\/\//i.test(url)) {
+
+      alert(
+        "Invalid URL. It must begin with http:// or https://"
+      );
+
+      return null;
+
+    }
+
+    localStorage.setItem(
+      storageKey,
+      url
+    );
+
   }
+
   return url;
+
 }
 
-export async function sendToWebhook(payload, options = {}) {
-  const isSlack = options.type === "slack";
-  const model = buildExportModel(payload);
+// generic ApI calls
 
-  const url = isSlack
-    ? resolveIntegrationUrl({
-        envValue: process.env.REACT_APP_SLACK_WEBHOOK_URL,
-        storageKey: "precifio_slack_webhook_url",
-        promptMessage: "Enter your Slack incoming webhook URL:"
-      })
-    : resolveIntegrationUrl({
-        envValue: process.env.REACT_APP_WEBHOOK_URL,
-        storageKey: "precifio_webhook_url",
-        promptMessage: "Enter your webhook URL:"
+export async function sendToIntegration({
+
+  provider,
+
+  payload,
+
+  userId,
+
+  exportFormat = null,
+
+  options = {}
+
+}) {
+
+  if (!provider) {
+    throw new Error(
+      "Integration provider is required."
+    );
+  }
+
+
+  const model =
+    buildExportModel(payload);
+
+
+  let url = null;
+
+
+  switch(provider) {
+
+
+    case "slack":
+
+      url = resolveIntegrationUrl({
+
+        envValue:
+          process.env.REACT_APP_SLACK_WEBHOOK_URL,
+
+        storageKey:
+          "precifio_slack_webhook_url",
+
+        promptMessage:
+          "Enter your Slack Incoming Webhook URL:"
+
       });
 
-  if (!url) return;
+      if (!url) return;
 
-  if (isSlack) {
-    return sendSlackMessage(url, model);
+      break;
+
+
+
+    case "webhook":
+
+      url = resolveIntegrationUrl({
+
+        envValue:
+          process.env.REACT_APP_WEBHOOK_URL,
+
+        storageKey:
+          "precifio_webhook_url",
+
+        promptMessage:
+          "Enter your Webhook URL:"
+
+      });
+
+      if (!url) return;
+
+      break;
+
+
+    default:
+
+      break;
+
   }
+
 
   const body = {
-    event: "extraction.completed",
-    timestamp: new Date().toISOString(),
-    payload: model
-  };
 
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: controller.signal
-    });
-    clearTimeout(timeout);
+  provider,
 
-    if (!res.ok) throw new Error(`Webhook returned HTTP ${res.status}`);
-    alert("Webhook delivered successfully!");
-  } catch (err) {
-    console.error("Webhook failed:", err);
-    const msg = err.name === "AbortError" ? "request timed out after 15s" : err.message;
-    alert(`Webhook failed: ${msg}\n\nTip: if this is a CORS error, route the request through your backend (REACT_APP_API_URL) instead of calling the webhook directly from the browser.`);
-  }
-}
+  userId,
 
-/**
- * Slack incoming webhooks expect a { text } body and block CORS preflight,
- * so we send a "simple request" (text/plain, no-cors). The message is
- * delivered, but the response is opaque — we can't read Slack's status code.
- */
-async function sendSlackMessage(url, model) {
-  const lines = [];
-  for (const seg of model.segments) {
-    lines.push(`*${seg.segment_name}*`);
-    for (const f of seg.fields || []) {
-      const val = typeof f.value === "object" ? JSON.stringify(f.value) : String(f.value ?? "");
-      lines.push(`• ${f.label}: ${val}`);
+  model,
+
+  exportFormat,
+
+  url,
+
+  options
+
+};
+
+
+  const res = await fetch(
+
+    `${INTEGRATION_API}/send-integration`,
+
+    {
+
+      method:"POST",
+
+      headers:{
+        "Content-Type":"application/json"
+      },
+
+      body:
+        JSON.stringify(body)
+
     }
+
+  );
+
+
+  const result =
+    await res.json();
+
+
+
+  if(!res.ok){
+
+    throw new Error(
+
+      result.error ||
+
+      `${provider} integration failed.`
+
+    );
+
   }
 
-  let text = `:page_facing_up: *Extraction completed:* ${model.fileName}\n`;
-  if (model.documentSummary) text += `_${model.documentSummary}_\n\n`;
-  text += lines.join("\n");
-  if (text.length > 3500) text = text.slice(0, 3500) + "\n…(truncated)";
 
-  try {
-    await fetch(url, {
-      method: "POST",
-      mode: "no-cors",
-      headers: { "Content-Type": "text/plain" },
-      body: JSON.stringify({ text })
-    });
-    alert("Sent to Slack! (If nothing appears in the channel, double-check the webhook URL.)");
-  } catch (err) {
-    console.error("Slack send failed:", err);
-    alert(`Slack send failed: ${err.message}`);
-  }
+  return result;
+
 }
 
 // ─── Email ────────────────────────────────────────────────────────
