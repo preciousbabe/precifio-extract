@@ -3,352 +3,87 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { supabase } from "../../config/supabase";
+import { useAuth } from "../../hooks/useAuth";
 import {
-  exportAsJSON,
-  exportAsCSV,
-  exportAsExcel,
-  exportAsPDF,
+  downloadExport,
   sendToIntegration,
+  connectIntegration,
+  buildExportModel,
   sendEmail,
   copyToClipboard
 } from "../../utils/export-utils";
 
-
-// ─── Inline Styles ─────────────────────────────────────────────────
-const styles = {
-  overlay: {
-    position: "fixed",
-    inset: 0,
-    width: "100vw",
-    height: "100dvh",
-    background: "rgba(0,0,0,.6)",
-    backdropFilter: "blur(8px)",
-    WebkitBackdropFilter: "blur(8px)",
-    display: "flex",
-    zIndex: 99999,
-    overflow: "hidden",
-    padding: 0,
-  },
-
-  card: {
-    background: "#fff",
-    width: "100%",
-    height: "100%",
-    display: "flex",
-    flexDirection: "column",
-    overflow: "hidden",
-    borderRadius: 0,
-    boxShadow: "none",
-  },
-
-  header: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: "16px",
-    padding: "clamp(14px,2vw,26px)",
-    borderBottom: "1px solid #e5e7eb",
-    background: "#fff",
-    flexShrink: 0,
-    flexWrap: "wrap",
-  },
-
-  headerLeft: {
-    flex: 1,
-    minWidth: 0,
-  },
-
-  headerTitle: {
-    margin: 0,
-    fontWeight: 700,
-    color: "#111827",
-    fontSize: "clamp(18px,2vw,28px)",
-    lineHeight: 1.3,
-    wordBreak: "break-word",
-  },
-
-  headerSubtitle: {
-    marginTop: "6px",
-    color: "#6b7280",
-    fontSize: "clamp(13px,1.2vw,15px)",
-    lineHeight: 1.5,
-    wordBreak: "break-word",
-  },
-
-  closeBtn: {
-    width: "42px",
-    height: "42px",
-    border: "1px solid #e5e7eb",
-    background: "#fff",
-    borderRadius: "10px",
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    flexShrink: 0,
-  },
-
-  metaBar: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: "12px",
-    padding: "12px clamp(14px,2vw,26px)",
-    background: "#f9fafb",
-    borderBottom: "1px solid #e5e7eb",
-    fontSize: "13px",
-    flexShrink: 0,
-  },
-
-  metaItem: {
-    display: "flex",
-    alignItems: "center",
-    gap: "6px",
-    minWidth: 0,
-  },
-
-  metaDot: {
-    width: "8px",
-    height: "8px",
-    borderRadius: "50%",
-    background: "#22c55e",
-    flexShrink: 0,
-  },
-
-  metaError: {
-    color: "#dc2626",
-    fontWeight: 600,
-  },
-
-  body: {
-    flex: 1,
-    overflowY: "auto",
-    overflowX: "hidden",
-    padding: "clamp(16px,2vw,30px)",
-    background: "#fff",
-    WebkitOverflowScrolling: "touch",
-  },
-
-  segment: {
-    marginBottom: "32px",
-  },
-
-  segmentTitle: {
-    fontSize: "12px",
-    fontWeight: 700,
-    textTransform: "uppercase",
-    letterSpacing: ".08em",
-    color: "#6b7280",
-    paddingBottom: "12px",
-    borderBottom: "2px solid #e5e7eb",
-    marginBottom: "16px",
-  },
-
-  kvRow: {
-    display: "flex",
-    alignItems: "flex-start",
-    gap: "16px",
-    padding: "14px 0",
-    borderBottom: "1px solid #f3f4f6",
-    flexWrap: "wrap",
-  },
-
-  kvLabel: {
-    flex: "0 0 180px",
-    fontWeight: 600,
-    color: "#4b5563",
-    fontSize: "14px",
-  },
-
-  kvValue: {
-    flex: 1,
-    minWidth: "220px",
-    fontSize: "14px",
-    lineHeight: 1.6,
-    wordBreak: "break-word",
-  },
-
-  kvConfidence: {
-    flexShrink: 0,
-    padding: "4px 10px",
-    borderRadius: "999px",
-    fontSize: "11px",
-    fontWeight: 700,
-    background: "#dcfce7",
-    color: "#15803d",
-  },
-
-  dataTable: {
-    width: "100%",
-    borderCollapse: "collapse",
-  },
-
-  tableHead: {
-    background: "#f9fafb",
-  },
-
-  tableTh: {
-    padding: "14px",
-    borderBottom: "2px solid #e5e7eb",
-    textAlign: "left",
-    fontSize: "12px",
-    fontWeight: 700,
-    background: "#f9fafb",
-  },
-
-  tableTd: {
-    padding: "14px",
-    borderBottom: "1px solid #f3f4f6",
-    fontSize: "14px",
-  },
-
-  exportBar: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: "16px",
-    flexWrap: "wrap",
-    padding: "16px clamp(14px,2vw,26px)",
-    borderTop: "1px solid #e5e7eb",
-    background: "#fff",
-    flexShrink: 0,
-  },
-
-  exportLabel: {
-    fontSize: "14px",
-    fontWeight: 600,
-    display: "flex",
-    alignItems: "center",
-    gap: "10px",
-  },
-
-  exportWrap: {
-    position: "relative",
-    maxWidth: "100%",
-  },
-
-  exportOption: {
-  display: "flex",
-  alignItems: "center",
-  gap: "14px",
-
-  width: "100%",
-  border: "none",
-  outline: "none",
-  background: "transparent",
-
-  padding: "13px 14px",
-
-  borderRadius: "12px",
-
-  cursor: "pointer",
-
-  color: "#111827",
-
-  fontSize: "14px",
-
-  fontWeight: 500,
-
-  transition: "all .2s ease",
-
-  fontFamily: "inherit",
-},
-
-
- exportTrigger: {
-  display: "flex",
-  alignItems: "center",
-  gap: "10px",
-  padding: "12px 18px",
-  background: "#2563eb",
-  color: "#fff",
-  border: "none",
-  borderRadius: "12px",
-  cursor: "pointer",
-  fontSize: "14px",
-  fontWeight: 600,
-  transition: "all .25s ease",
-  boxShadow: "0 8px 20px rgba(37,99,235,.25)",
-},
-
-exportHeader: {
-  padding: "14px 14px 8px",
-  fontSize: "11px",
-  fontWeight: 700,
-  textTransform: "uppercase",
-  letterSpacing: ".08em",
-  color: "#9ca3af",
-},
-
-exportDivider: {
-  height: "1px",
-  background: "#edf2f7",
-  margin: "10px 0",
-},
-
-  exportMenu: {
-  position: "absolute",
-  bottom: "calc(100% + 12px)",
-  right: 0,
-  width: "min(360px,95vw)",
-  maxHeight: "70vh",
-  overflowY: "auto",
-  background: "#fff",
-  borderRadius: "18px",
-  border: "1px solid #e5e7eb",
-  boxShadow: "0 30px 60px rgba(0,0,0,.18)",
-  padding: "10px",
-  zIndex: 999,
-},
-
-
-  errorBox: {
-    background: "#fef2f2",
-    border: "1px solid #fee2e2",
-    borderRadius: "12px",
-    padding: "20px",
-  },
-
-  emptyState: {
-    padding: "80px 20px",
-    textAlign: "center",
-    color: "#9ca3af",
-  },
-
-  nestedTable: {
-    width: "100%",
-    borderCollapse: "collapse",
-  },
-
-  nestedTh: {
-    textAlign: "left",
-    width: "35%",
-    padding: "6px 0",
-    color: "#6b7280",
-  },
-
-  nestedTd: {
-    padding: "6px 0",
-    wordBreak: "break-word",
-  },
-
-  nestedList: {
-    listStyle: "none",
-    margin: 0,
-    padding: 0,
-  },
-
-  nestedListItem: {
-    padding: "6px 0",
-    borderBottom: "1px solid #f3f4f6",
-  },
-};
-
+import "./QueueViewer.css";
 
 // ─── Icons ──────────────────────────────────────────────────────────
+
 const IconClose = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+  </svg>
+);
+
+const IconPdf = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+    <polyline points="14 2 14 8 20 8"/>
+    <path d="M8 13h8"/>
+    <path d="M8 17h5"/>
+  </svg>
+);
+
+const IconDocx = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+    <polyline points="14 2 14 8 20 8"/>
+    <path d="M8 13l2 4 2-4 2 4 2-4"/>
+  </svg>
+);
+
+const IconCsv = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+    <polyline points="14 2 14 8 20 8"/>
+    <path d="M8 13h8"/>
+    <path d="M8 17h8"/>
+    <path d="M12 13v4"/>
+  </svg>
+);
+
+const IconJson = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+    <polyline points="14 2 14 8 20 8"/>
+    <path d="M9 10c-1 0-2 1-2 2s1 2 2 2"/>
+    <path d="M15 10c1 0 2 1 2 2s-1 2-2 2"/>
+  </svg>
+);
+
+const IconOneDrive = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M7 17h11a3 3 0 0 0 0-6 5 5 0 0 0-9-2 4 4 0 0 0-5 4 4 4 0 0 0 3 4z"/>
+  </svg>
+);
+
+const IconDropbox = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="7 4 3 7 7 10 11 7 7 4"/>
+    <polyline points="17 4 13 7 17 10 21 7 17 4"/>
+    <polyline points="7 12 3 15 7 18 11 15 7 12"/>
+    <polyline points="17 12 13 15 17 18 21 15 17 12"/>
+    <path d="M12 20l-3-2 3-2 3 2-3 2z"/>
+  </svg>
+);
+
+const IconGoogleDrive = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M7 4h10" />
+    <path d="M7 4l-5 8" />
+    <path d="M17 4l5 8" />
+    <path d="M2 12h20" />
+    <path d="M7 20l-5-8" />
+    <path d="M17 20l5-8" />
+    <path d="M7 20h10" />
   </svg>
 );
 
@@ -364,27 +99,26 @@ const IconChevronUp = () => (
   </svg>
 );
 
-const IconFile = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/>
-  </svg>
-);
-
 const IconWebhook = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M18 16.98h-5.99c-1.1 0-1.95.94-2.48 1.9A4 4 0 0 1 2 17c.01-.7.2-1.4.57-2"/><path d="m6 17 3.13-5.78c.53-.97.1-2.18-.5-3.1a4 4 0 0 1 3.89-6.06"/><path d="m12.26 12.15 3.74-6.94a4 4 0 0 1 3.87-6.07"/><path d="M5.57 9.3c.66.27 1.45.19 2.03-.24l2.59-1.95a3 3 0 0 1 4.17.56l1.18 1.56"/>
+    <path d="M18 16.98h-5.99c-1.1 0-1.95.94-2.48 1.9A4 4 0 0 1 2 17c.01-.7.2-1.4.57-2"/>
+    <path d="m6 17 3.13-5.78c.53-.97.1-2.18-.5-3.1a4 4 0 0 1 3.89-6.06"/>
+    <path d="m12.26 12.15 3.74-6.94a4 4 0 0 1 3.87-6.07"/>
+    <path d="M5.57 9.3c.66.27 1.45.19 2.03-.24l2.59-1.95a3 3 0 0 1 4.17.56l1.18 1.56"/>
   </svg>
 );
 
 const IconMail = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/>
+    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+    <polyline points="22,6 12,13 2,6"/>
   </svg>
 );
 
 const IconCopy = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
   </svg>
 );
 
@@ -396,27 +130,71 @@ const IconCheck = () => (
 
 const IconSlack = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M14.5 10c-.83 0-1.5-.67-1.5-1.5v-5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5v5c0 .83-.67 1.5-1.5 1.5z"/><path d="M20.5 10H19V8.5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/><path d="M9.5 14c.83 0 1.5.67 1.5 1.5v5c0 .83-.67 1.5-1.5 1.5S8 21.33 8 20.5v-5c0-.83.67-1.5 1.5-1.5z"/><path d="M3.5 14H5v1.5c0 .83-.67 1.5-1.5 1.5S2 16.33 2 15.5 2.67 14 3.5 14z"/><path d="M14 14.5c0-.83.67-1.5 1.5-1.5h5c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5h-5c-.83 0-1.5-.67-1.5-1.5z"/><path d="M15.5 19H14v1.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5-.67-1.5-1.5-1.5z"/><path d="M10 9.5c0 .83-.67 1.5-1.5 1.5h-5c-.83 0-1.5-.67-1.5-1.5S2.67 8 3.5 8h5c.83 0 1.5.67 1.5 1.5z"/><path d="M8.5 5H10V3.5C10 2.67 9.33 2 8.5 2S7 2.67 7 3.5 7.67 5 8.5 5z"/>
+    <path d="M14.5 10c-.83 0-1.5-.67-1.5-1.5v-5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5v5c0 .83-.67 1.5-1.5 1.5z"/>
+    <path d="M20.5 10H19V8.5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/>
+    <path d="M9.5 14c.83 0 1.5.67 1.5 1.5v5c0 .83-.67 1.5-1.5 1.5S8 21.33 8 20.5v-5c0-.83.67-1.5 1.5-1.5z"/>
+    <path d="M3.5 14H5v1.5c0 .83-.67 1.5-1.5 1.5S2 16.33 2 15.5 2.67 14 3.5 14z"/>
+    <path d="M14 14.5c0-.83.67-1.5 1.5-1.5h5c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5h-5c-.83 0-1.5-.67-1.5-1.5z"/>
+    <path d="M15.5 19H14v1.5c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5-.67-1.5-1.5-1.5z"/>
+    <path d="M10 9.5c0 .83-.67 1.5-1.5 1.5h-5c-.83 0-1.5-.67-1.5-1.5S2.67 8 3.5 8h5c.83 0 1.5.67 1.5 1.5z"/>
+    <path d="M8.5 5H10V3.5C10 2.67 9.33 2 8.5 2S7 2.67 7 3.5 7.67 5 8.5 5z"/>
   </svg>
 );
 
 const IconXero = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/><path d="M8 8l8 8"/><path d="M16 8l-8 8"/>
+    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/>
+    <path d="M8 8l8 8"/>
+    <path d="M16 8l-8 8"/>
   </svg>
 );
 
 const IconQuickBooks = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <rect x="3" y="3" width="18" height="18" rx="3"/><path d="M7 12h10"/><path d="M12 7v10"/>
+    <rect x="3" y="3" width="18" height="18" rx="3"/>
+    <path d="M7 12h10"/>
+    <path d="M12 7v10"/>
   </svg>
 );
 
 const IconExcel = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M8 13h2"/><path d="M8 17h2"/><path d="M14 13h2"/><path d="M14 17h2"/>
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+    <polyline points="14 2 14 8 20 8"/>
+    <path d="M8 13h2"/>
+    <path d="M8 17h2"/>
+    <path d="M14 13h2"/>
+    <path d="M14 17h2"/>
   </svg>
 );
+
+const IconTable = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+    <line x1="3" y1="9" x2="21" y2="9"/>
+    <line x1="3" y1="15" x2="21" y2="15"/>
+    <line x1="9" y1="3" x2="9" y2="21"/>
+    <line x1="15" y1="3" x2="15" y2="21"/>
+  </svg>
+);
+
+const IconCode = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="16 18 22 12 16 6"/>
+    <polyline points="8 6 2 12 8 18"/>
+  </svg>
+);
+
+const IconWord = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+    <polyline points="14 2 14 8 20 8"/>
+    <path d="M8 12h8"/>
+    <path d="M8 16h8"/>
+    <path d="M8 20h8"/>
+  </svg>
+);
+
 
 // ─── Helpers ────────────────────────────────────────────────────────
 
@@ -424,7 +202,6 @@ function shouldRenderAsTable(segment) {
   const fields = segment.fields || [];
   const isPlainObject = (v) => v && typeof v === "object" && !Array.isArray(v);
 
-  // Shape test: 2+ rows, every row a plain object, identical keys, >= 2 columns.
   let shapeLooksTabular = false;
   if (fields.length >= 2 && isPlainObject(fields[0].value)) {
     const keys = Object.keys(fields[0].value);
@@ -438,11 +215,10 @@ function shouldRenderAsTable(segment) {
   }
 
   const t = (segment.segment_type || "").toLowerCase();
-  if (t === "table") return shapeLooksTabular; // trust "table" only if shape agrees
+  if (t === "table") return shapeLooksTabular;
   if (t === "detail") return false;
-  return shapeLooksTabular; // legacy data with no segment_type
+  return shapeLooksTabular;
 }
-
 
 function getTableColumns(fields) {
   const firstVal = fields[0].value;
@@ -450,12 +226,6 @@ function getTableColumns(fields) {
     return Object.keys(firstVal);
   }
   return ["value"];
-}
-
-function confidenceClass(pct) {
-  if (pct >= 90) return "";
-  if (pct >= 70) return "low";
-  return "very-low";
 }
 
 function formatLabel(key) {
@@ -466,114 +236,73 @@ function formatLabel(key) {
 
 function KVRow({ label, value, confidence }) {
   const pct = Math.round((confidence || 0) * 100);
-  const confStyle = {
-    ...styles.kvConfidence,
-    ...(pct < 70 ? (pct < 50 ? styles.kvConfidenceVeryLow : styles.kvConfidenceLow) : {}),
-  };
+  const confClass =
+    pct < 50 ? "queue-kv-confidence very-low"
+    : pct < 70 ? "queue-kv-confidence low"
+    : "queue-kv-confidence";
 
   return (
-    <div style={styles.kvRow}>
-      <div style={styles.kvLabel}>{label}</div>
-      <div style={styles.kvValue}>{renderValue(value)}</div>
-      <div style={confStyle}>{pct}%</div>
+    <div className="queue-kv-row">
+      <div className="queue-kv-label">{label}</div>
+      <div className="queue-kv-value">{renderValue(value)}</div>
+      <div className={confClass}>{pct}%</div>
     </div>
   );
 }
 
 function DataTable({ fields }) {
   const columns = getTableColumns(fields);
-  const moneyCols = ["unit_price", "total", "subtotal", "discount", "tax", "shipping", "amount_due", "amount_paid", "balance_due", "price", "cost"];
+  const moneyCols = [
+    "unit_price", "total", "subtotal", "discount", "tax", "shipping",
+    "amount_due", "amount_paid", "balance_due", "price", "cost",
+  ];
   const numberCols = ["qty", "quantity", "amount", "count", "line_number"];
 
   return (
-  <div
-    style={{
-      width: "100%",
-      overflowX: "auto",
-      WebkitOverflowScrolling: "touch",
-    }}
-  >
-    <table style={styles.dataTable}>
-      <thead>
-        <tr>
-          {columns.map(col => (
-            <th
-              key={col}
-              style={{
-                ...styles.tableTh,
-                textAlign:
-                  moneyCols.includes(col) || numberCols.includes(col)
-                    ? "center"
-                    : "left",
-              }}
-            >
-              {formatLabel(col)}
-            </th>
-          ))}
-          <th
-            style={{
-              ...styles.tableTh,
-              textAlign: "center",
-            }}
-          >
-            Conf.
-          </th>
-        </tr>
-      </thead>
-
-      <tbody>
-        {fields.map((field, idx) => {
-          const row = field.value || {};
-          const pct = Math.round((field.confidence || 0) * 100);
-
-          return (
-            <tr
-              key={idx}
-              style={idx % 2 === 1 ? { background: "#fafafa" } : {}}
-            >
-              {columns.map(col => {
-                const v = row[col];
-                const isMoney = moneyCols.includes(col);
-                const isNum = numberCols.includes(col);
-
-                return (
-                  <td
-                    key={col}
-                    style={{
-                      ...styles.tableTd,
-                      textAlign:
-                        isMoney || isNum ? "right" : "left",
-                      fontWeight: isMoney ? 600 : 400,
-                    }}
-                  >
-                    {renderValue(v)}
-                  </td>
-                );
-              })}
-
-              <td
-                style={{
-                  ...styles.tableTd,
-                  textAlign: "center",
-                  fontSize: "12px",
-                  fontWeight: 700,
-                  color:
-                    pct >= 90
-                      ? "#16a34a"
-                      : pct >= 70
-                      ? "#d97706"
-                      : "#dc2626",
-                }}
+    <div className="table-scroll">
+      <table className="data-table">
+        <thead className="table-head">
+          <tr>
+            {columns.map((col) => (
+              <th
+                key={col}
+                className={moneyCols.includes(col) || numberCols.includes(col) ? "table-th text-center" : "table-th"}
               >
-                {pct}%
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
-  </div>
-);
+                {formatLabel(col)}
+              </th>
+            ))}
+            <th className="table-th text-center">Conf.</th>
+          </tr>
+        </thead>
+        <tbody>
+          {fields.map((field, idx) => {
+            const row = field.value || {};
+            const pct = Math.round((field.confidence || 0) * 100);
+            return (
+              <tr key={idx} className={idx % 2 ? "table-row-alt" : ""}>
+                {columns.map((col) => {
+                  const v = row[col];
+                  const isMoney = moneyCols.includes(col);
+                  const isNum = numberCols.includes(col);
+                  return (
+                    <td
+                      key={col}
+                      className={["table-td", isMoney || isNum ? "text-right" : "", isMoney ? "money-cell" : ""].filter(Boolean).join(" ")}
+                    >
+                      {renderValue(v)}
+                    </td>
+                  );
+                })}
+                <td className={["table-td", "table-confidence", pct >= 90 ? "good" : pct >= 70 ? "medium" : "bad"].join(" ")}>
+                  {pct}%
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 function renderValue(value) {
@@ -581,25 +310,25 @@ function renderValue(value) {
   if (typeof value === "string" || typeof value === "number") return String(value);
   if (Array.isArray(value)) {
     if (value.length === 0) return "—";
-    if (value.every(v => typeof v === "string" || typeof v === "number")) {
+    if (value.every((v) => typeof v === "string" || typeof v === "number")) {
       return value.join(", ");
     }
     return (
-      <ul style={styles.nestedList}>
+      <ul className="nested-list">
         {value.map((v, i) => (
-          <li key={i} style={styles.nestedListItem}>{renderValue(v)}</li>
+          <li key={i} className="nested-list-item">{renderValue(v)}</li>
         ))}
       </ul>
     );
   }
   if (typeof value === "object") {
     return (
-      <table style={styles.nestedTable}>
+      <table className="nested-table">
         <tbody>
           {Object.entries(value).map(([k, v]) => (
             <tr key={k}>
-              <th style={styles.nestedTh}>{formatLabel(k)}</th>
-              <td style={styles.nestedTd}>{renderValue(v)}</td>
+              <th className="nested-th">{formatLabel(k)}</th>
+              <td className="nested-td">{renderValue(v)}</td>
             </tr>
           ))}
         </tbody>
@@ -610,18 +339,19 @@ function renderValue(value) {
 }
 
 
-// ─── Export Dropdown ──────────────────────────────────────────────
-
-function ExportDropdown({ item, segments, onExport }) {
+function ExportDropdown({ item, segments, onExport, user }) {
   const [open, setOpen] = useState(false);
+  const [submenu, setSubmenu] = useState(null);
   const [copied, setCopied] = useState(false);
   const [exporting, setExporting] = useState(null);
+  const DEFAULT_UPLOAD_FORMAT = "pdf";
   const menuRef = useRef(null);
 
   useEffect(() => {
     function handleClick(e) {
       if (menuRef.current && !menuRef.current.contains(e.target)) {
         setOpen(false);
+        setSubmenu(null);
       }
     }
     if (open) document.addEventListener("mousedown", handleClick);
@@ -629,153 +359,266 @@ function ExportDropdown({ item, segments, onExport }) {
   }, [open]);
 
   const handleExport = async (format) => {
-    setExporting(format);
-    try {
-      const payload = {
-        fileName: item.name,
-        documentSummary: item.result?.documentSummary,
-        segments,
-        metadata: item.result?.metadata
-      };
+  setExporting(format);
+  try {
+    const payload = {
+      fileName: item.name,
+      documentSummary: item.result?.documentSummary,
+      segments,
+      metadata: item.result?.metadata
+    };
 
-      const connection = item.connection || null;
+    switch (format) {
+      case "json":
+        await downloadExport({ payload, format: "json" });
+        break;
+      case "csv":
+        await downloadExport({ payload, format: "csv" });
+        break;
+      case "excel":
+        await downloadExport({ payload, format: "xlsx" });
+        break;
+      case "pdf":
+        await downloadExport({ payload, format: "pdf" });
+        break;
+      case "docx":
+        await downloadExport({ payload, format: "docx" });
+        break;
 
-      switch (format) {
-        case "json": exportAsJSON(payload); break;
-        case "csv": exportAsCSV(payload); break;
-        case "excel": exportAsExcel(payload); break;
-        case "pdf": await exportAsPDF(payload); break;
-      case "xero":
-case "quickbooks":
-case "google-drive":
-case "dropbox":
-case "onedrive":
-case "webhook":
-case "slack":
+      case "xero-pdf":
+      case "xero-docx":
+      case "xero-json":
+      case "xero-csv":
+      case "xero-xlsx":
+      case "quickbooks-pdf":
+      case "quickbooks-docx":
+      case "quickbooks-json":
+      case "quickbooks-csv":
+      case "quickbooks-xlsx":
+      case "google-drive-pdf":
+      case "google-drive-docx":
+      case "google-drive-json":
+      case "google-drive-csv":
+      case "google-drive-xlsx":
+      case "dropbox-pdf":
+      case "dropbox-docx":
+      case "dropbox-json":
+      case "dropbox-csv":
+      case "dropbox-xlsx":
+      case "onedrive-pdf":
+      case "onedrive-docx":
+      case "onedrive-json":
+      case "onedrive-csv":
+      case "onedrive-xlsx":
+      case "webhook":
+      case "slack":
+        if (!user) {
+          alert("Please sign in to use integrations.");
+          setExporting(null);
+          return;
+        }
 
-console.log("ITEM", item);
-console.log("USER ID", item.user_id, item.userId);
-const {
-  data: { user }
-} = await supabase.auth.getUser();
+        // ─── FIXED PARSING ─────────────────────────────
+        // Don't use format.split("-") — it breaks on "google-drive-pdf"
+        const oauthProviders = ["google-drive", "dropbox", "onedrive", "xero", "quickbooks"];
+        
+        let cloudProvider = format;
+        let exportFormat = DEFAULT_UPLOAD_FORMAT;
 
-if (!user) {
-  alert("Please sign in to use integrations.");
-  return;
-}
+        // Find the longest matching provider prefix
+        for (const p of oauthProviders.sort((a, b) => b.length - a.length)) {
+          if (format === p) {
+            cloudProvider = p;
+            exportFormat = DEFAULT_UPLOAD_FORMAT;
+            break;
+          }
+          if (format.startsWith(p + "-")) {
+            cloudProvider = p;
+            exportFormat = format.slice(p.length + 1); // everything after "provider-"
+            break;
+          }
+        }
 
-await sendToIntegration({
+        // For non-OAuth providers (webhook, slack), format IS the provider
+        if (!oauthProviders.includes(cloudProvider)) {
+          cloudProvider = format;
+          exportFormat = DEFAULT_UPLOAD_FORMAT;
+        }
+        // ──────────────────────────────────────────────
 
-  provider: format,
+        if (oauthProviders.includes(cloudProvider)) {
+          await connectIntegration({
+            provider: cloudProvider,
+            userId: user.id,
+            model: buildExportModel(payload),
+            exportFormat,
+            options: {}
+          });
+        } else {
+          await sendToIntegration({
+            provider: cloudProvider,
+            payload,
+            userId: user.id,
+            exportFormat
+          });
+        }
+        break;
 
-  payload,
+      case "email":
+        await sendEmail(payload);
+        break;
 
-  userId: user.id,
+      case "clipboard":
+        await copyToClipboard(payload);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+        break;
 
-  exportFormat: "pdf"
-
-});
-
-  break;
-        case "clipboard":
-          await copyToClipboard(payload);
-          setCopied(true);
-          setTimeout(() => setCopied(false), 2000);
-          break;
-        default: break;
-      }
-      if (onExport) onExport(format);
-    } catch (err) {
-      console.error("Export failed:", err);
-    } finally {
-      setExporting(null);
-      setOpen(false);
+      default:
+        console.warn("Unknown export format:", format);
+        break;
     }
-  };
+
+    if (onExport) onExport(format);
+  } catch (err) {
+    console.error("Export failed:", err);
+    alert(err.message || "Export failed.");
+  } finally {
+    setExporting(null);
+    setOpen(false);
+    setSubmenu(null);
+  }
+};
+
+  const EXPORT_FORMATS = [
+    { key: "pdf", label: "PDF", icon: <IconPdf /> },
+    { key: "docx", label: "Word (.docx)", icon: <IconWord /> },
+    { key: "excel", label: "Excel (.xlsx)", icon: <IconExcel /> },
+    { key: "csv", label: "CSV", icon: <IconTable /> },
+    { key: "json", label: "JSON", icon: <IconCode /> },
+  ];
 
   return (
-    <div style={styles.exportWrap} ref={menuRef}>
+    <div className="export-wrap" ref={menuRef}>
       <button
-        style={{
-          ...styles.exportTrigger,
-          ...(open ? { borderColor: "#3b82f6", boxShadow: "0 0 0 3px rgba(59,130,246,0.15)" } : {}),
-        }}
+        className={`export-trigger ${open ? "export-trigger--active" : ""}`}
         onClick={() => setOpen(!open)}
+        disabled={!!exporting}
       >
         <IconDownload />
         <span>{exporting ? "Exporting…" : copied ? "Copied!" : "Export / Send"}</span>
-        <span style={{ display: "inline-flex", transition: "transform 0.2s", transform: open ? "rotate(180deg)" : "rotate(0deg)", marginLeft: "4px", opacity: 0.6 }}>
+        <span className="export-chevron" style={{ transform: open ? "rotate(180deg)" : "rotate(0deg)" }}>
           <IconChevronUp />
         </span>
       </button>
+
       {open && (
-        <div style={styles.exportMenu}>
-          <div style={styles.exportHeader}>Download to device</div>
-          <button style={styles.exportOption} onClick={() => handleExport("json")} onMouseEnter={(e) => e.currentTarget.style.background = "#f3f4f6"} onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
-            <IconFile /> JSON (structured data)
-          </button>
-          <button style={styles.exportOption} onClick={() => handleExport("csv")} onMouseEnter={(e) => e.currentTarget.style.background = "#f3f4f6"} onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
-            <IconFile /> CSV (spreadsheet)
-          </button>
-          <button style={styles.exportOption} onClick={() => handleExport("excel")} onMouseEnter={(e) => e.currentTarget.style.background = "#f3f4f6"} onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
-            <IconExcel /> Excel (.xls)
-          </button>
-          <button style={styles.exportOption} onClick={() => handleExport("pdf")} onMouseEnter={(e) => e.currentTarget.style.background = "#f3f4f6"} onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
-            <IconFile /> PDF (formatted report)
-          </button>
-          <div style={styles.exportDivider} />
-          <div style={styles.exportHeader}>Accounting integrations</div>
-          <button style={styles.exportOption} onClick={() => handleExport("xero")} onMouseEnter={(e) => e.currentTarget.style.background = "#f3f4f6"} onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
-            <IconXero /> Xero (invoice JSON)
-          </button>
-          <button style={styles.exportOption} onClick={() => handleExport("quickbooks")} onMouseEnter={(e) => e.currentTarget.style.background = "#f3f4f6"} onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
-            <IconQuickBooks /> QuickBooks (invoice JSON)
-          </button>
-          <div style={styles.exportDivider} />
+        <div className="export-menu">
+          <div className="export-header">Download to device</div>
 
-<div style={styles.exportHeader}>
-  Cloud integrations
-</div>
-
-
-<button
- style={styles.exportOption}
- onClick={() => handleExport("google-drive")}
->
-  Google Drive
-</button>
-
-
-<button
- style={styles.exportOption}
- onClick={() => handleExport("dropbox")}
->
-  Dropbox
-</button>
-
-
-<button
- style={styles.exportOption}
- onClick={() => handleExport("onedrive")}
->
-  OneDrive
-</button>
-
-
-          <div style={styles.exportDivider} />
-          <div style={styles.exportHeader}>Send to system</div>
-          <button style={styles.exportOption} onClick={() => handleExport("webhook")} onMouseEnter={(e) => e.currentTarget.style.background = "#f3f4f6"} onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
-            <IconWebhook /> Webhook (API endpoint)
+          <button className="export-option" onClick={() => handleExport("json")}>
+            <IconCode /> JSON (structured data)
           </button>
-          <button style={styles.exportOption} onClick={() => handleExport("email")} onMouseEnter={(e) => e.currentTarget.style.background = "#f3f4f6"} onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
-            <IconMail /> Email (as attachment)
+          <button className="export-option" onClick={() => handleExport("csv")}>
+            <IconTable /> CSV (spreadsheet)
           </button>
-          <button style={styles.exportOption} onClick={() => handleExport("slack")} onMouseEnter={(e) => e.currentTarget.style.background = "#f3f4f6"} onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
-            <IconSlack /> Slack / Teams message
+          <button className="export-option" onClick={() => handleExport("excel")}>
+            <IconExcel /> Excel (.xlsx)
           </button>
-          <div style={styles.exportDivider} />
-          <div style={styles.exportHeader}>Copy</div>
-          <button style={styles.exportOption} onClick={() => handleExport("clipboard")} onMouseEnter={(e) => e.currentTarget.style.background = "#f3f4f6"} onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}>
+          <button className="export-option" onClick={() => handleExport("pdf")}>
+            <IconPdf /> PDF (formatted report)
+          </button>
+          <button className="export-option" onClick={() => handleExport("docx")}>
+            <IconWord /> Word (.docx)
+          </button>
+
+          <div className="export-divider" />
+          <div className="export-header">Accounting integrations</div>
+
+          <button className="export-option" onClick={() => handleExport("xero")}>
+            <IconXero /> Xero
+          </button>
+          <button className="export-option" onClick={() => handleExport("quickbooks")}>
+            <IconQuickBooks /> QuickBooks
+          </button>
+
+          <div className="export-divider" />
+          <div className="export-header">Cloud integrations</div>
+
+          <div
+            className="submenu-wrap"
+            onMouseEnter={() => setSubmenu("google-drive")}
+            onMouseLeave={() => setSubmenu(null)}
+          >
+            <button className="export-option">
+              <IconGoogleDrive /> Google Drive <span className="submenu-arrow">›</span>
+            </button>
+            {submenu === "google-drive" && (
+              <div className="submenu">
+                {EXPORT_FORMATS.map(f => (
+                  <button key={f.key} className="export-option" onClick={() => handleExport(`google-drive-${f.key}`)}>
+                    {f.icon} {f.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div
+            className="submenu-wrap"
+            onMouseEnter={() => setSubmenu("dropbox")}
+            onMouseLeave={() => setSubmenu(null)}
+          >
+            <button className="export-option">
+              <IconDropbox /> Dropbox <span className="submenu-arrow">›</span>
+            </button>
+            {submenu === "dropbox" && (
+              <div className="submenu">
+                {EXPORT_FORMATS.map(f => (
+                  <button key={f.key} className="export-option" onClick={() => handleExport(`dropbox-${f.key}`)}>
+                    {f.icon} {f.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div
+            className="submenu-wrap"
+            onMouseEnter={() => setSubmenu("onedrive")}
+            onMouseLeave={() => setSubmenu(null)}
+          >
+            <button className="export-option">
+              <IconOneDrive /> OneDrive <span className="submenu-arrow">›</span>
+            </button>
+            {submenu === "onedrive" && (
+              <div className="submenu">
+                {EXPORT_FORMATS.map(f => (
+                  <button key={f.key} className="export-option" onClick={() => handleExport(`onedrive-${f.key}`)}>
+                    {f.icon} {f.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="export-divider" />
+          <div className="export-header">Send to system</div>
+
+          <button className="export-option" onClick={() => handleExport("webhook")}>
+            <IconWebhook /> Webhook
+          </button>
+          <button className="export-option" onClick={() => handleExport("email")}>
+            <IconMail /> Email
+          </button>
+          <button className="export-option" onClick={() => handleExport("slack")}>
+            <IconSlack /> Slack / Teams
+          </button>
+
+          <div className="export-divider" />
+          <div className="export-header">Copy</div>
+
+          <button className="export-option" onClick={() => handleExport("clipboard")}>
             {copied ? <IconCheck /> : <IconCopy />}
             {copied ? "Copied to clipboard" : "Copy to clipboard"}
           </button>
@@ -786,94 +629,78 @@ await sendToIntegration({
 }
 
 
-
 // ─── Main Component ───────────────────────────────────────────────
 
 export default function QueueViewer({ item, onClose, onExport }) {
-  if (!item) return null;
+  const { user } = useAuth();
+  const extraction = item?.result ?? {};
+  const metadata = extraction.metadata ?? {};
+  const segments = extraction.segments ?? [];
 
-  const extraction = item.result || {};
-  const metadata = extraction.metadata || {};
-  const segments = extraction.segments || [];
-
-
-  // Lock body scroll when overlay is open
   useEffect(() => {
+    if (!item) {
+      document.body.style.overflow = "";
+      return;
+    }
     document.body.style.overflow = "hidden";
     return () => { document.body.style.overflow = ""; };
-  }, []);
+  }, [item]);
 
-  // Close on Escape key
   useEffect(() => {
-    function handleKey(e) {
-      if (e.key === "Escape") onClose();
-    }
+    if (!item) return;
+    const handleKey = (e) => { if (e.key === "Escape") onClose(); };
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
-  }, [onClose]);
+  }, [item, onClose]);
+
+  if (!item) return null;
 
   const overlay = (
-    <div
-      style={styles.overlay}
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-    >
-      <div style={styles.card} onClick={(e) => e.stopPropagation()}>
+    <div className="queue-overlay" onClick={onClose} role="dialog" aria-modal="true">
+      <div className="queue-card" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
-        <div style={styles.header}>
-          <div style={styles.headerLeft}>
-            <h2 style={styles.headerTitle}>{item.name}</h2>
-            <p style={styles.headerSubtitle}>{extraction.documentSummary || "No summary available"}</p>
+        <div className="queue-header">
+          <div className="queue-header-left">
+            <h2 className="queue-header-title">{item.name}</h2>
+            <p className="queue-header-subtitle">{extraction.documentSummary || "No summary available"}</p>
           </div>
-          <button
-            style={styles.closeBtn}
-            onClick={onClose}
-            title="Close"
-            onMouseEnter={(e) => { e.currentTarget.style.background = "#fef2f2"; e.currentTarget.style.borderColor = "#fecaca"; e.currentTarget.style.color = "#ef4444"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = "#ffffff"; e.currentTarget.style.borderColor = "#e5e7eb"; e.currentTarget.style.color = "#6b7280"; }}
-          >
+          <button className="queue-close-btn" onClick={onClose} title="Close">
             <IconClose />
           </button>
         </div>
 
         {/* Meta bar */}
-        <div style={styles.metaBar}>
-          <span style={styles.metaItem}><span style={styles.metaDot} />Type: {item.type}</span>
-          <span style={styles.metaItem}><span style={styles.metaDot} />Characters: {metadata.textLength || 0}</span>
-          <span style={styles.metaItem}><span style={styles.metaDot} />🔒 Secured by Precifio AI</span>
-          {item.error && <span style={{ ...styles.metaItem, ...styles.metaError }}><span style={{ ...styles.metaDot, background: "#ef4444" }} />Error: {item.error}</span>}
+        <div className="queue-meta-bar">
+          <span className="queue-meta-item"><span className="queue-meta-dot" />Type: {item.type}</span>
+          <span className="queue-meta-item"><span className="queue-meta-dot" />Characters: {metadata.textLength || 0}</span>
+          <span className="queue-meta-item"><span className="queue-meta-dot" />🔒 Secured by Precifio AI</span>
+          {item.error && <span className="queue-meta-item queue-meta-error"><span className="queue-meta-dot" style={{ background: "#ef4444" }} />Error: {item.error}</span>}
         </div>
 
         {/* Body */}
-        <div style={styles.body}>
+        <div className="queue-body">
           {item.error && !segments.length && (
-            <div style={styles.errorBox}>
+            <div className="error-box">
               <h3 style={{ fontSize: "15px", fontWeight: 700, marginBottom: "8px", marginTop: 0 }}>Processing Error</h3>
               <p style={{ margin: 0, lineHeight: 1.6 }}>{item.error}</p>
             </div>
           )}
 
           {segments.length === 0 && !item.error && (
-            <div style={styles.emptyState}>No extracted fields available.</div>
+            <div className="empty-state">No extracted fields available.</div>
           )}
 
           {segments.map((segment, index) => {
             const isTable = shouldRenderAsTable(segment);
             return (
-              <div key={index} style={styles.segment}>
-                <h3 style={styles.segmentTitle}>{segment.segment_name}</h3>
+              <div key={index} className="queue-segment">
+                <h3 className="queue-segment-title">{segment.segment_name}</h3>
                 {isTable ? (
                   <DataTable fields={segment.fields || []} />
                 ) : (
                   <div>
                     {(segment.fields || []).map((field, idx) => (
-                      <KVRow
-                        key={idx}
-                        label={field.label}
-                        value={field.value}
-                        confidence={field.confidence}
-                      />
+                      <KVRow key={idx} label={field.label} value={field.value} confidence={field.confidence} />
                     ))}
                   </div>
                 )}
@@ -883,17 +710,15 @@ export default function QueueViewer({ item, onClose, onExport }) {
         </div>
 
         {/* Export bar */}
-        <div style={styles.exportBar}>
-          <div style={styles.exportLabel}>
-            <IconDownload />
-            Export or send this extraction
+        <div className="export-bar">
+          <div className="export-label">
+            <IconDownload /> Export or send this extraction
           </div>
-          <ExportDropdown item={item} segments={segments} onExport={onExport} />
+          <ExportDropdown item={item} segments={segments} onExport={onExport} user={user} />
         </div>
       </div>
     </div>
   );
 
-  // Render via portal to document.body to escape any parent containers
   return createPortal(overlay, document.body);
 }

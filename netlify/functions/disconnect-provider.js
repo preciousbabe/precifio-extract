@@ -34,8 +34,8 @@ exports.handler = async (event) => {
       );
     }
 
-    const integration =
-      registry.get(provider);
+ const integration =
+  registry.getProvider(provider);
 
     if (!integration) {
       return responses.notFound(

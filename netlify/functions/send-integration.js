@@ -7,6 +7,8 @@ const engine = require("./integrations/engine");
 const auth = require("./integrations/auth");
 const responses = require("./integrations/responses");
 const logger = require("./integrations/logger");
+const exporter = require("./integrations/export");
+const uploader = require("./integrations/upload");
 
 exports.handler = async (event) => {
 
@@ -38,7 +40,17 @@ exports.handler = async (event) => {
 
 } = body;
     
-    console.log(body);
+   console.log("================================");
+console.log("SEND INTEGRATION REQUEST");
+console.log("================================");
+
+console.log({
+  provider,
+  userId,
+  exportFormat,
+  hasModel: !!model,
+  hasOptions: !!options
+});
 
     if (!provider) {
 
@@ -50,6 +62,17 @@ exports.handler = async (event) => {
 
     const integration =
       registry.getProvider(provider);
+
+      console.log("PROVIDER");
+
+console.log({
+  provider,
+  exists: !!integration,
+  supportsOAuth: registry.supportsOAuth(provider),
+  supportsUpload: registry.supportsUpload(provider),
+  supportsTransformation: registry.supportsTransformation(provider),
+  supportsSend: registry.supportsSend(provider)
+});
 
     if (!integration) {
 
@@ -77,19 +100,30 @@ exports.handler = async (event) => {
 
       }
 
+      console.log("LOOKING UP USER CONNECTION");
+
+  console.log({
+  provider,
+  userId
+  });
+
       connection =
         await auth.getIntegrationConnection(
           userId,
           provider
         );
 
-      if (!connection) {
+        console.log("GOOGLE CONNECTION");
+        console.log(connection);
+    if (!connection) {
 
-        return responses.unauthorized(
-          `${provider} is not connected.`
-        );
+  console.log("NO STORED CONNECTION FOUND");
 
-      }
+  return responses.unauthorized(
+    `${provider} is not connected.`
+  );
+
+ } 
 
       if (
 
@@ -113,6 +147,8 @@ exports.handler = async (event) => {
 
         const oauth =
           registry.getOAuth(provider);
+
+          console.log("REFRESHING ACCESS TOKEN");
 
         const refreshed =
           await oauth.refreshToken({
@@ -209,29 +245,28 @@ exports.handler = async (event) => {
 
         });
 
-      const client =
-        registry.getProviderClient(provider);
+    const result =
+  await client.upload({
 
-      const result =
-        await client.send({
+    connection,
 
-          connection,
+    exportFile: exported,
 
-          payload: transformed,
+    options
 
-          options
+  });
+  
+return responses.success({
 
-        });
+  exported: true,
 
-      return responses.success({
+  provider,
 
-        exported: true,
+  format: exported.extension,
 
-        provider,
+  result
 
-        result
-
-      });
+});
 
     }
 
@@ -263,25 +298,69 @@ exports.handler = async (event) => {
       }
 
       logger.info(
-        "Preparing upload export.",
-        {
-          provider,
-          exportFormat
-        }
-      );
+  "Generating export.",
+  {
+    provider,
+    exportFormat
+  }
+);
 
-      return responses.success({
+const exported =
+  await exporter.generateExport({
 
-        pending: true,
+    model,
 
-        provider,
+    format: exportFormat
 
-        exportFormat,
+  });
 
-        message:
-          "Upload export pipeline initialized."
+  console.log("EXPORT GENERATED");
 
-      });
+console.log({
+  fileName: exported.fileName,
+  extension: exported.extension,
+  mimeType: exported.mimeType,
+  size: exported.buffer.length
+});
+
+
+const client =
+  registry.getProviderClient(provider);
+
+  console.log("STARTING UPLOADER");
+
+console.log({
+  provider,
+  fileName: exported.fileName,
+  accessTokenExists: !!connection.access_token
+});
+
+const result =
+  await client.upload({
+
+    connection,
+
+    exportFile: exported,
+
+    options
+
+});
+
+  console.log("UPLOAD RESULT");
+
+console.log(result);
+
+return responses.success({
+
+  exported: true,
+
+  provider,
+
+  format: exported.extension,
+
+  result
+
+});
 
 }
         /*

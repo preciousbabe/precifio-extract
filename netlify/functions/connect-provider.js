@@ -23,11 +23,13 @@ exports.handler = async (event) => {
     const body =
       JSON.parse(event.body || "{}");
 
-
-    const {
-      provider,
-      userId
-    } = body;
+const {
+  provider,
+  userId,
+  model,
+  exportFormat,
+  options = {}
+} = body;
 
 
 
@@ -53,7 +55,11 @@ exports.handler = async (event) => {
     const integration =
       registry.getProvider(provider);
 
-
+  console.log({
+  provider,
+  integrationFound: !!integration,
+  hasOAuth: !!integration.oauth
+   });
 
     if (!integration) {
 
@@ -84,9 +90,11 @@ exports.handler = async (event) => {
      * Create OAuth state
      */
 
-    const state =
-      auth.createState();
+const state = auth.createState();
 
+console.log("NEW OAUTH STATE CREATED");
+
+console.log(state);
 
 
     /*
@@ -117,7 +125,12 @@ exports.handler = async (event) => {
 
       });
 
+      console.log("AUTHORIZATION URL GENERATED");
 
+console.log({
+  provider,
+  hasCodeVerifier: !!result.codeVerifier
+});
 
     /*
      * Save temporary OAuth session
@@ -126,23 +139,45 @@ exports.handler = async (event) => {
      * We will add this function to auth.js next.
      */
 
+   console.log("PENDING EXPORT RECEIVED");
+
+console.log({
+    provider,
+    exportFormat,
+    hasModel: !!model
+});
+
     await auth.saveOAuthState({
 
-      state:
-        state.value,
+  state: state.value,
 
-      userId,
+  userId,
 
-      provider,
+  provider,
 
-      codeVerifier:
-        result.codeVerifier,
+  codeVerifier: result.codeVerifier,
 
-      expiresAt:
-        new Date(state.expiresAt)
+  expiresAt: new Date(state.expiresAt),
 
-    });
+  pendingUpload: {
 
+    model,
+
+    exportFormat,
+
+    options
+
+  }
+
+});
+
+console.log("OAUTH STATE SAVED");
+
+console.log({
+  state: state.value,
+  provider,
+  userId
+});
 
 
     logger.info(
@@ -154,15 +189,13 @@ exports.handler = async (event) => {
     );
 
 
+console.log("AUTHORIZE URL:");
+console.log(result.authorizationUrl);
 
-    return responses.success({
-
-      provider,
-
-      authorizeUrl:
-        result.authorizationUrl
-
-    });
+return responses.success({
+  provider,
+  authorizeUrl: result.authorizationUrl
+});
 
 
 

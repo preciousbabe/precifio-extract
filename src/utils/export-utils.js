@@ -1,521 +1,261 @@
 // src/utils/export-utils.js
-// Export handlers — confidence AND internal metadata stripped from all exports
-// Requires: npm install jspdf jspdf-autotable
 
-import { jsPDF } from "jspdf";
-import autoTable from "jspdf-autotable";
 const INTEGRATION_API = "/.netlify/functions";
 
+// const DEFAULT_EMAIL_FORMAT = "pdf";
+
 /**
- * Download a blob as a file
+ * Download a blob as a file.
  */
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
+
   const a = document.createElement("a");
+
   a.href = url;
   a.download = filename;
+
   document.body.appendChild(a);
+
   a.click();
+
   document.body.removeChild(a);
+
   URL.revokeObjectURL(url);
 }
 
 /**
- * Strip confidence from segments for model export
+ * Remove confidence values from exported data.
  */
-function stripConfidence(segments) {
-  return segments.map(seg => ({
-    ...seg,
-    fields: (seg.fields || []).map(f => {
-      const { confidence, ...rest } = f;
-      // Also strip confidence from nested object values
-      if (rest.value && typeof rest.value === "object" && !Array.isArray(rest.value)) {
-        const { confidence: _, ...cleanValue } = rest.value;
-        return { ...rest, value: cleanValue };
+function stripConfidence(segments = []) {
+  return segments.map(segment => ({
+    ...segment,
+
+    fields: (segment.fields || []).map(field => {
+
+      const { confidence, ...cleanField } = field;
+
+      if (
+        cleanField.value &&
+        typeof cleanField.value === "object" &&
+        !Array.isArray(cleanField.value)
+      ) {
+
+        const {
+          confidence: nestedConfidence,
+          ...cleanValue
+        } = cleanField.value;
+
+        return {
+          ...cleanField,
+          value: cleanValue
+        };
+
       }
-      return rest;
+
+      return cleanField;
+
     })
   }));
 }
 
 /**
- * Build the model export payload used by every export/share channel.
- * Deliberately excludes internal metadata (extraction method, aiProvider,
- * creditsUsed, newBalance, etc.) — only user-facing data is exported.
+ * Determines if a segment represents a table.
  */
-function buildExportModel(payload) {
+function isTableSegment(segment) {
 
-  const segments = stripConfidence(payload.segments || []);
+  if (!segment) return false;
+
+  if (
+    segment.segment_type === "table"
+  ) {
+    return true;
+  }
+
+  const fields = segment.fields || [];
+
+  if (fields.length < 2) {
+    return false;
+  }
+
+  const first = fields[0]?.value;
+
+  if (
+    !first ||
+    typeof first !== "object" ||
+    Array.isArray(first)
+  ) {
+    return false;
+  }
+
+  const keys = Object.keys(first);
+
+  return fields.every(field => {
+
+    const value = field.value;
+
+    return (
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      JSON.stringify(Object.keys(value)) === JSON.stringify(keys)
+    );
+
+  });
+
+}
+
+/**
+ * Build clean export payload.
+ */
+export function buildExportModel(payload) {
+
+  const segments = stripConfidence(
+    payload.segments || []
+  );
 
   const tables = [];
   const details = [];
 
   for (const segment of segments) {
+
     if (isTableSegment(segment)) {
+
       tables.push(segment);
+
     } else {
+
       details.push(segment);
+
     }
+
   }
 
   return {
+
     fileName: payload.fileName,
-    documentSummary: payload.documentSummary,
-    extractedAt: new Date().toISOString(),
+
+    documentSummary:
+      payload.documentSummary,
+
+    extractedAt:
+      new Date().toISOString(),
+
     segments,
+
     tables,
+
     details
+
   };
 
 }
 
-function buildIntegrationExport(payload, format) {
-  const model = buildExportModel(payload);
-
-  return {
-    format,
-    generatedBy: "Precifio Extract",
-    generatedAt: model.extractedAt,
-    fileName: model.fileName,
-    documentSummary: model.documentSummary,
-    tables: model.tables,
-    details: model.details
-  };
-}
-
-
-
-
-function getTableHeaders(table) {
-  if (!table?.fields?.length) {
-    return [];
-  }
-
-  const firstRow = table.fields[0]?.value;
-
-  if (!firstRow || typeof firstRow !== "object") {
-    return [];
-  }
-
-  return Object.keys(firstRow);
-}
-
-function getTableRows(table) {
-  return (table.fields || []).map(field => field.value || {});
-}
-
-
 /**
- * Returns true if a segment represents a table.
+ * Download an export from the backend export engine.
  */
-function isTableSegment(segment) {
-  const fields = segment?.fields || [];
+export async function downloadExport({
 
-  return (
-    fields.length > 1 &&
-    fields.every(field =>
-      field &&
-      field.value &&
-      typeof field.value === "object" &&
-      !Array.isArray(field.value)
-    )
-  );
-}
+  payload,
 
+  format
 
-/**
- * Returns all non-table segments.
- */
-function getScalarSegments(segments) {
-  return (segments || []).filter(seg => !isTableSegment(seg));
-}
+}) {
 
-/**
- * Flatten all scalar segments.
- */
-function getScalarFields(segments) {
+  const model =
+    buildExportModel(payload);
 
-  const rows = [];
+  const response = await fetch(
 
-  for (const seg of getScalarSegments(segments)) {
+    `${INTEGRATION_API}/generate-export`,
 
-    for (const field of seg.fields || []) {
+    {
 
-      rows.push({
+      method: "POST",
 
-        segment: seg.segment_name,
+      headers: {
 
-        label: field.label,
+        "Content-Type": "application/json"
 
-        value: field.value
+      },
 
-      });
+      body: JSON.stringify({
 
-    }
+        model,
 
-  }
-
-  return rows;
-
-}
-
-// ─── JSON ─────────────────────────────────────────────────────────
-
-export function exportAsJSON(payload) {
-  const data = buildExportModel(payload);
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-  downloadBlob(blob, `${payload.fileName.replace(/\.[^.]+$/, "")}_extracted.json`);
-}
-
-// ─── CSV ──────────────────────────────────────────────────────────
-
-export function exportAsCSV(payload) {
- const model = buildExportModel(payload);
- const tableSegments = model.tables;
- const scalarFields = getScalarFields(model.details);
-  let csv = "";
-
-  if (tableSegments.length) {
-    for (const table of tableSegments) {
-
-  csv += `"${table.segment_name}"\n`;
-
-  const headers = getTableHeaders(table);
-
-  csv += headers.map(h => `"${h}"`).join(",") + "\n";
-
-  for (const row of getTableRows(table)) {
-
-    csv += headers
-      .map(col => {
-        const v = row[col];
-
-        if (v === null || v === undefined) {
-          return `""`;
-        }
-
-        return `"${String(v).replace(/"/g,'""')}"`;
+        format
 
       })
-      .join(",");
-
-    csv += "\n";
-
-  }
-
-  csv += "\n";
-
-}
-  } else {
-    if (scalarFields.length) {
-
-  csv += `"Details"\n`;
-  csv += `"Segment","Field","Value"\n`;
-
-  for (const row of scalarFields) {
-
-    csv += `"${row.segment}","${row.label}","${String(row.value).replace(/"/g,'""')}"\n`;
-
-  }
-
-}
-  }
-
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  downloadBlob(blob, `${payload.fileName.replace(/\.[^.]+$/, "")}_extracted.csv`);
-}
-
-// ─── Excel (.xlsx) ───────────────────────────────────────────────
-
-export function exportAsExcel(payload) {
- const model = buildExportModel(payload);
-const tableSegments = model.tables;
-const scalarFields = getScalarFields(model.details);
-
-  let html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
-<head><meta charset="utf-8"><style>td,th{border:1px solid #ccc;padding:6px;font-family:Arial;font-size:12px}th{background:#f0f0f0;font-weight:bold}</style></head>
-<body><table>`;
-
-  html += `<tr><th colspan="10" style="font-size:14px;background:#1e40af;color:white">${escapeHtml(payload.fileName)} — Extraction Results</th></tr>`;
-  html += `<tr><td colspan="10" style="background:#f9fafb">${escapeHtml(payload.documentSummary || "")} | Extracted: ${new Date().toLocaleString()}</td></tr>`;
-  html += `<tr><td colspan="10"></td></tr>`;
-
-  //
-// Export every table exactly as GPT produced it
-//
-
-for (const table of tableSegments) {
-
-  html += `
-    <tr>
-      <th colspan="20"
-          style="
-            background:#2563eb;
-            color:white;
-            font-size:13px;
-            text-align:left;
-            padding:8px;
-          ">
-        ${escapeHtml(table.segment_name)}
-      </th>
-    </tr>
-  `;
-
- const headers = getTableHeaders(table);
-
-html += "<tr>";
-
-for (const header of headers) {
-    html += `<th>${escapeHtml(header)}</th>`;
-  }
-
-  html += "</tr>";
-
-  for (const row of getTableRows(table)) {
-
-    html += "<tr>";
-
-    for (const header of headers) {
-
-      html += `<td>${
-        escapeHtml(String(row[header] ?? ""))
-      }</td>`;
 
     }
 
-    html += "</tr>";
-
-  }
-
-  html += `<tr><td colspan="20"></td></tr>`;
-
-}
-
-if (scalarFields.length) {
-
-  html += `
-    <tr>
-      <th colspan="3"
-          style="
-            background:#111827;
-            color:white;
-            text-align:left;
-            padding:8px;
-          ">
-        Details
-      </th>
-    </tr>
-  `;
-
-  html += `
-    <tr>
-      <th>Segment</th>
-      <th>Field</th>
-      <th>Value</th>
-    </tr>
-  `;
-
-  for (const row of scalarFields) {
-
-    html += `
-      <tr>
-        <td>${escapeHtml(row.segment)}</td>
-        <td>${escapeHtml(row.label)}</td>
-        <td>${escapeHtml(String(row.value))}</td>
-      </tr>
-    `;
-
-  }
-
-}
-
-  html += `</table></body></html>`;
-
-  const blob = new Blob([html], { type: "application/vnd.ms-excel" });
-  downloadBlob(blob, `${payload.fileName.replace(/\.[^.]+$/, "")}_extracted.xls`);
-}
-
-// ─── PDF (real file download via jsPDF) ───────────────────────────
-
-function formatPdfCell(value) {
-  if (value === null || value === undefined) return "";
-
-  if (typeof value === "object") {
-    return JSON.stringify(value);
-  }
-
-  return String(value);
-}
-
-export function exportAsPDF(payload) {
-
-  const model = buildExportModel(payload);
-
-  const doc = new jsPDF({
-    unit: "pt",
-    format: "a4"
-  });
-
-  const pageWidth = doc.internal.pageSize.getWidth();
-  const margin = 40;
-
-  let y = margin;
-
-  // Title
-
-  doc.setFontSize(18);
-  doc.setTextColor(0);
-
-  doc.text(
-    model.fileName || "Extraction",
-    margin,
-    y
   );
 
-  y += 24;
+  if (!response.ok) {
 
-  // Summary
+    let error = {};
 
-  if (model.documentSummary) {
+    try {
 
-    doc.setFontSize(10);
-    doc.setTextColor(110);
+      error = await response.json();
 
-    const lines = doc.splitTextToSize(
-      model.documentSummary,
-      pageWidth - margin * 2
+    } catch {}
+
+    throw new Error(
+
+      error.error ||
+
+      "Failed to generate export."
+
     );
-
-    doc.text(lines, margin, y);
-
-    y += lines.length * 13 + 8;
 
   }
 
-  // Timestamp
+  const blob =
+    await response.blob();
 
-  doc.setFontSize(9);
-  doc.setTextColor(150);
-
-  doc.text(
-    `Extracted on ${new Date(model.extractedAt).toLocaleString()}`,
-    margin,
-    y
-  );
-
-  y += 22;
-
-  doc.setTextColor(0);
-
-  // Render every segment exactly as GPT produced it
-
-  for (const segment of model.segments) {
-
-    if (y > 700) {
-      doc.addPage();
-      y = margin;
-    }
-
-    doc.setFontSize(13);
-
-    doc.text(
-      segment.segment_name || "Segment",
-      margin,
-      y
+  const disposition =
+    response.headers.get(
+      "Content-Disposition"
     );
 
-    y += 8;
+  const baseName = (
+    model.fileName || "document"
+  ).replace(/\.[^/.]+$/, "");
 
-    if (isTableSegment(segment)) {
+  let filename =
+    `${baseName}.${format}`;
 
-      const headers = getTableHeaders(segment);
+  if (disposition) {
 
-      const rows = getTableRows(segment);
+    const match =
+      disposition.match(
+        /filename="?(.+?)"?$/
+      );
 
-      autoTable(doc, {
+    if (match) {
 
-        startY: y,
-
-        head: [headers],
-
-        body: rows.map(row =>
-          headers.map(header =>
-            formatPdfCell(row[header])
-          )
-        ),
-
-        margin: {
-          left: margin,
-          right: margin
-        },
-
-        styles: {
-          fontSize: 9,
-          cellPadding: 6
-        },
-
-        headStyles: {
-          fillColor: [243, 244, 246],
-          textColor: 0,
-          fontStyle: "bold"
-        },
-
-        pageBreak: "auto",
-        rowPageBreak: "auto"
-
-      });
-
-    } else {
-
-      autoTable(doc, {
-
-        startY: y,
-
-        body: (segment.fields || []).map(field => [
-
-          field.label,
-
-          formatPdfCell(field.value)
-
-        ]),
-
-        margin: {
-          left: margin,
-          right: margin
-        },
-
-        styles: {
-          fontSize: 9,
-          cellPadding: 6
-        },
-
-        columnStyles: {
-          0: {
-            cellWidth: 180,
-            fontStyle: "bold"
-          }
-        },
-
-        pageBreak: "auto",
-        rowPageBreak: "auto"
-
-      });
+      filename = match[1];
 
     }
-
-    y = (doc.lastAutoTable?.finalY || y) + 24;
 
   }
 
-  const base =
-    (model.fileName || "document")
-      .replace(/\.[^.]+$/, "");
+  downloadBlob(blob, filename);
 
-  doc.save(`${base}_extracted.pdf`);
+  return {
+
+    success: true,
+
+    filename
+
+  };
 
 }
 
-
+/**
+ * Resolve user-configurable integration URLs.
+ */
 function resolveIntegrationUrl({
   envValue,
   storageKey,
@@ -528,7 +268,8 @@ function resolveIntegrationUrl({
 
   if (!url) {
 
-    const entered = prompt(promptMessage);
+    const entered =
+      prompt(promptMessage);
 
     if (!entered) {
       return null;
@@ -539,7 +280,7 @@ function resolveIntegrationUrl({
     if (!/^https?:\/\//i.test(url)) {
 
       alert(
-        "Invalid URL. It must begin with http:// or https://"
+        "Invalid URL. URL must begin with http:// or https://"
       );
 
       return null;
@@ -557,8 +298,141 @@ function resolveIntegrationUrl({
 
 }
 
-// generic ApI calls
+/**
+ * Launch OAuth authorization flow.
+ */
+export async function connectIntegration({
 
+  provider,
+
+  userId,
+
+  model,
+
+  exportFormat,
+
+  options = {}
+
+}) {
+
+  console.log("================================");
+  console.log("CONNECT INTEGRATION CALLED");
+  console.log("================================");
+  console.log({ provider, userId });
+
+  console.log("PENDING EXPORT");
+
+console.log({
+    provider,
+    exportFormat,
+    hasModel: !!model,
+    options
+});
+
+
+  const response = await fetch(
+
+    `${INTEGRATION_API}/connect-provider`,
+
+    {
+
+      method: "POST",
+
+      headers: {
+
+        "Content-Type": "application/json"
+
+      },
+
+      body: JSON.stringify({
+
+  provider,
+
+  userId,
+
+  model,
+
+  exportFormat,
+
+  options
+
+})
+
+    }
+
+  );
+
+  console.log("CONNECT STATUS");
+  console.log(response.status);
+
+  let result = {};
+
+  try {
+
+    result = await response.json();
+
+  } catch (err) {
+
+    console.error("FAILED TO PARSE JSON RESPONSE");
+    console.error(err);
+
+  }
+
+  console.log("================================");
+  console.log("CONNECT RESULT");
+  console.log("================================");
+  console.log(result);
+
+  if (!response.ok) {
+
+    throw new Error(
+
+      result?.error ||
+
+      result?.message ||
+
+      "Failed to initialize OAuth."
+
+    );
+
+  }
+
+  console.log("RESULT.DATA");
+  console.log(result?.data);
+
+  console.log("RESULT.AUTHORIZEURL");
+  console.log(result?.authorizeUrl);
+
+  const authorizeUrl =
+
+    result?.data?.authorizeUrl ||
+
+    result?.authorizeUrl ||
+
+    null;
+
+  console.log("FINAL AUTHORIZE URL");
+  console.log(authorizeUrl);
+
+  if (!authorizeUrl) {
+
+    throw new Error(
+
+      "Authorization URL missing."
+
+    );
+
+  }
+
+  console.log("REDIRECTING TO GOOGLE...");
+
+  window.location.href = authorizeUrl;
+
+}
+
+/**
+ * Send export to an integration.
+ */
 export async function sendToIntegration({
 
   provider,
@@ -567,28 +441,28 @@ export async function sendToIntegration({
 
   userId,
 
-  exportFormat = null,
+  exportFormat = "pdf",
 
   options = {}
 
 }) {
 
   if (!provider) {
-    throw new Error(
-      "Integration provider is required."
-    );
-  }
 
+    throw new Error(
+
+      "Integration provider is required."
+
+    );
+
+  }
 
   const model =
     buildExportModel(payload);
 
-
   let url = null;
 
-
-  switch(provider) {
-
+  switch (provider) {
 
     case "slack":
 
@@ -605,11 +479,11 @@ export async function sendToIntegration({
 
       });
 
-      if (!url) return;
+      if (!url) {
+        return;
+      }
 
       break;
-
-
 
     case "webhook":
 
@@ -626,10 +500,22 @@ export async function sendToIntegration({
 
       });
 
-      if (!url) return;
+      if (!url) {
+        return;
+      }
 
       break;
 
+    case "google-drive":
+    case "dropbox":
+    case "onedrive":
+    case "xero":
+    case "quickbooks":
+
+      // OAuth is handled by ExportDropdown.
+      // We simply continue to send-integration.
+
+      break;
 
     default:
 
@@ -637,50 +523,59 @@ export async function sendToIntegration({
 
   }
 
-
   const body = {
 
-  provider,
+    provider,
 
-  userId,
+    userId,
 
-  model,
+    model,
 
-  exportFormat,
+    exportFormat,
 
-  url,
+    options
 
-  options
+  };
 
-};
+  if (url) {
 
+    body.url = url;
 
-  const res = await fetch(
+  }
+
+  const response = await fetch(
 
     `${INTEGRATION_API}/send-integration`,
 
     {
 
-      method:"POST",
+      method: "POST",
 
-      headers:{
-        "Content-Type":"application/json"
+      headers: {
+
+        "Content-Type": "application/json"
+
       },
 
-      body:
-        JSON.stringify(body)
+      body: JSON.stringify(body)
 
     }
 
   );
 
+  let result = {};
 
-  const result =
-    await res.json();
+  try {
 
+    result = await response.json();
 
+  } catch {
 
-  if(!res.ok){
+    result = {};
+
+  }
+
+  if (!response.ok) {
 
     throw new Error(
 
@@ -692,92 +587,156 @@ export async function sendToIntegration({
 
   }
 
+  return result;
+
+}
+
+
+// ─── Email ────────────────────────────────────────────────────────
+
+const DEFAULT_EMAIL_FORMAT = "pdf";
+
+export async function sendEmail(
+
+  payload,
+
+  exportFormat = DEFAULT_EMAIL_FORMAT
+
+) {
+
+  const email = prompt(
+    "Enter recipient email address:"
+  );
+
+  if (!email) {
+    return;
+  }
+
+  const to = email.trim();
+
+  if (
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)
+  ) {
+
+    alert(
+      "Please enter a valid email address."
+    );
+
+    return;
+
+  }
+
+  const model =
+    buildExportModel(payload);
+
+  const subject =
+    `Document Extraction: ${model.fileName}`;
+
+  const response = await fetch(
+
+    `${INTEGRATION_API}/send-email`,
+
+    {
+
+      method: "POST",
+
+      headers: {
+
+        "Content-Type":
+          "application/json"
+
+      },
+
+      body: JSON.stringify({
+
+        to,
+
+        subject,
+
+        model,
+
+        exportFormat
+
+      })
+
+    }
+
+  );
+
+  let result = {};
+
+  try {
+
+    result =
+      await response.json();
+
+  } catch {
+
+    result = {};
+
+  }
+
+  if (!response.ok) {
+
+    throw new Error(
+
+      result.error ||
+
+      "Unable to send email."
+
+    );
+
+  }
+
+  alert(
+    `Email sent successfully as ${exportFormat.toUpperCase()}.`
+  );
 
   return result;
 
 }
 
-// ─── Email ────────────────────────────────────────────────────────
-
-export async function sendEmail(payload) {
-  const email = prompt("Enter recipient email address:");
-  if (!email) return;
-
-  const to = email.trim();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
-    alert("Please enter a valid email address.");
-    return;
-  }
-
-  const model = buildExportModel(payload);
-  const subject = `Document Extraction: ${model.fileName}`;
-
-  try {
-  const res = await fetch("/.netlify/functions/send-email", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      to,
-      subject,
-      payload: model
-    })
-  });
-
-  const result = await res.json();
-
-  if (!res.ok) {
-    throw new Error(result.error || "Unable to send email.");
-  }
-
-  alert("Email sent successfully!");
-  return;
-
-} catch (err) {
-  console.error(err);
-}
-
-
-  const blob = new Blob([JSON.stringify(model, null, 2)], { type: "application/json" });
-  downloadBlob(blob, `${model.fileName.replace(/\.[^.]+$/, "")}_extracted.json`);
-
-  const mailSubject = encodeURIComponent(subject);
-  const mailBody = encodeURIComponent(
-    `Document extraction results for: ${model.fileName}\n\n` +
-    `Summary: ${model.documentSummary || "N/A"}\n` +
-    `Extracted at: ${new Date().toLocaleString()}\n\n` +
-    `The full extraction JSON has been downloaded to your computer — please attach it to this email.`
-  );
-
-  window.location.href = `mailto:${to}?subject=${mailSubject}&body=${mailBody}`;
-}
-
 // ─── Clipboard ────────────────────────────────────────────────────
 
 export async function copyToClipboard(payload) {
-  const text = JSON.stringify(buildExportModel(payload), null, 2)
+
+  const text = JSON.stringify(
+
+    buildExportModel(payload),
+
+    null,
+
+    2
+
+  );
 
   try {
-    await navigator.clipboard.writeText(text);
-  } catch (err) {
-    const textarea = document.createElement("textarea");
+
+    await navigator.clipboard.writeText(
+      text
+    );
+
+  } catch {
+
+    const textarea =
+      document.createElement(
+        "textarea"
+      );
+
     textarea.value = text;
-    document.body.appendChild(textarea);
+
+    document.body.appendChild(
+      textarea
+    );
+
     textarea.select();
+
     document.execCommand("copy");
-    document.body.removeChild(textarea);
+
+    document.body.removeChild(
+      textarea
+    );
+
   }
+
 }
-
-// ─── Helpers ──────────────────────────────────────────────────────
-
-function escapeHtml(str) {
-  return String(str)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-

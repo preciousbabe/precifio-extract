@@ -32,6 +32,13 @@ const providers = Object.freeze({
     oauth: require("./oauth/xero"),
     provider: require("./providers/xero"),
     prompt: require("./prompts/xero"),
+
+    env: Object.freeze({
+    clientId: "XERO_CLIENT_ID",
+    clientSecret: "XERO_CLIENT_SECRET",
+    redirectUri: "XERO_REDIRECT_URI"
+   }),
+
     capabilities: Object.freeze([
       "oauth",
       "transform",
@@ -45,6 +52,13 @@ const providers = Object.freeze({
     oauth: require("./oauth/quickbooks"),
     provider: require("./providers/quickbooks"),
     prompt: require("./prompts/quickbooks"),
+
+    env: Object.freeze({
+    clientId: "QUICKBOOKS_CLIENT_ID",
+    clientSecret: "QUICKBOOKS_CLIENT_SECRET",
+    redirectUri: "QUICKBOOKS_REDIRECT_URI"
+   }),
+
     capabilities: Object.freeze([
       "oauth",
       "transform",
@@ -71,21 +85,37 @@ const providers = Object.freeze({
   }),
 
   "google-drive": Object.freeze({
-    id: "google-drive",
-    displayName: "Google Drive",
-    oauth: require("./oauth/google-drive"),
-    provider: require("./providers/google-drive"),
-    capabilities: Object.freeze([
-      "oauth",
-      "upload"
-    ])
+  id: "google-drive",
+  displayName: "Google Drive",
+
+  oauth: require("./oauth/google-drive"),
+  provider: require("./upload/google-drive"),
+
+  env: Object.freeze({
+    clientId: "GOOGLE_DRIVE_CLIENT_ID",
+    clientSecret: "GOOGLE_DRIVE_CLIENT_SECRET",
+    redirectUri: "GOOGLE_DRIVE_REDIRECT_URI"
   }),
+
+  capabilities: Object.freeze([
+    "oauth",
+    "upload"
+  ])
+}),
+
 
   dropbox: Object.freeze({
     id: "dropbox",
     displayName: "Dropbox",
     oauth: require("./oauth/dropbox"),
-    provider: require("./providers/dropbox"),
+    provider: require("./upload/dropbox"),
+
+    env: Object.freeze({
+    clientId: "DROPBOX_CLIENT_ID",
+    clientSecret: "DROPBOX_CLIENT_SECRET",
+    redirectUri: "DROPBOX_REDIRECT_URI"
+}),
+
     capabilities: Object.freeze([
       "oauth",
       "upload"
@@ -96,65 +126,21 @@ const providers = Object.freeze({
     id: "onedrive",
     displayName: "OneDrive",
     oauth: require("./oauth/onedrive"),
-    provider: require("./providers/onedrive"),
+    provider: require("./upload/onedrive"),
+
+    env: Object.freeze({
+    clientId: "ONEDRIVE_CLIENT_ID",
+    clientSecret: "ONEDRIVE_CLIENT_SECRET",
+    redirectUri: "ONEDRIVE_REDIRECT_URI"
+   }),
+
     capabilities: Object.freeze([
       "oauth",
       "upload"
     ])
   }),
 
-  notion: Object.freeze({
-    id: "notion",
-    displayName: "Notion",
-    oauth: require("./oauth/notion"),
-    provider: require("./providers/notion"),
-    prompt: require("./prompts/notion"),
-    capabilities: Object.freeze([
-      "oauth",
-      "transform",
-      "send"
-    ])
-  }),
-
-  airtable: Object.freeze({
-    id: "airtable",
-    displayName: "Airtable",
-    oauth: require("./oauth/airtable"),
-    provider: require("./providers/airtable"),
-    prompt: require("./prompts/airtable"),
-    capabilities: Object.freeze([
-      "oauth",
-      "transform",
-      "send"
-    ])
-  }),
-
-  salesforce: Object.freeze({
-    id: "salesforce",
-    displayName: "Salesforce",
-    oauth: require("./oauth/salesforce"),
-    provider: require("./providers/salesforce"),
-    prompt: require("./prompts/salesforce"),
-    capabilities: Object.freeze([
-      "oauth",
-      "transform",
-      "send"
-    ])
-  }),
-
-  hubspot: Object.freeze({
-    id: "hubspot",
-    displayName: "HubSpot",
-    oauth: require("./oauth/hubspot"),
-    provider: require("./providers/hubspot"),
-    prompt: require("./prompts/hubspot"),
-    capabilities: Object.freeze([
-      "oauth",
-      "transform",
-      "send"
-    ])
-  })
-
+  
 });
 
 /* -------------------------------------------------------------------------- */

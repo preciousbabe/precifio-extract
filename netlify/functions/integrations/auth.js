@@ -311,10 +311,23 @@ async function saveOAuthState({
 
   codeVerifier,
 
-  expiresAt
+  expiresAt,
+
+  pendingUpload = null
 
 }) {
 
+  console.log("================================");
+  console.log("SAVING OAUTH STATE");
+  console.log("================================");
+
+  console.log({
+    state,
+    provider,
+    userId,
+    expiresAt,
+    hasCodeVerifier: !!codeVerifier
+  });
 
   const {
     data,
@@ -323,25 +336,33 @@ async function saveOAuthState({
 
     .from("integration_oauth_states")
 
-    .insert({
+  .insert({
 
-      state,
+  state,
 
-      user_id: userId,
+  user_id: userId,
 
-      provider,
+  provider,
 
-      code_verifier: codeVerifier,
+  code_verifier: codeVerifier,
 
-      expires_at: expiresAt
+  expires_at: expiresAt,
 
-    })
+  pending_upload: pendingUpload
+
+})
 
     .select()
 
     .single();
 
+  console.log("SAVE OAUTH RESULT");
 
+  console.log("DATA");
+  console.log(data);
+
+  console.log("ERROR");
+  console.log(error);
 
   if (error) {
 
@@ -349,11 +370,9 @@ async function saveOAuthState({
 
   }
 
-
   return data;
 
 }
-
 
 
 /**
@@ -385,8 +404,6 @@ async function consumeOAuthState(state) {
 
   }
 
-
-
   if (!data) {
 
     return null;
@@ -407,6 +424,41 @@ async function consumeOAuthState(state) {
 
   return data;
 
+}
+
+async function getOAuthState(state) {
+  const {
+    data,
+    error
+  } = await supabaseAdmin
+    .from("integration_oauth_states")
+    .select("*")
+    .eq("state", state)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+
+async function deleteOAuthState(state) {
+  console.log("DELETING OAUTH STATE");
+  console.log(state);
+  const { error } = await supabaseAdmin
+    .from("integration_oauth_states")
+    .delete()
+    .eq("state", state);
+
+    console.log("DELETE ERROR");
+
+    console.log(error);
+
+  if (error) {
+    throw error;
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -438,42 +490,59 @@ async function saveIntegrationConnection({
 
 }) {
 
+  console.log("================================");
+  console.log("UPSERT USER INTEGRATION");
+  console.log("================================");
+
+  console.log({
+    userId,
+    provider,
+    expiresAt,
+    accountId,
+    workspaceId,
+    status
+  });
+
   const { data, error } =
 
     await supabaseAdmin
+  .from("user_integrations")
+  .upsert(
+    {
 
-      .from("user_integrations")
+      user_id: userId,
 
-      .upsert({
+      provider,
 
-        user_id: userId,
+      status,
 
-        provider,
+      encrypted_access_token: encrypt(accessToken),
 
-        status,
+      encrypted_refresh_token: encrypt(refreshToken),
 
-        encrypted_access_token:
-          encrypt(accessToken),
+      token_expires_at: expiresAt,
 
-        encrypted_refresh_token:
-          encrypt(refreshToken),
+      provider_account_id: accountId,
 
-        token_expires_at:
-          expiresAt,
+      provider_workspace_id: workspaceId,
 
-        provider_account_id:
-          accountId,
+      metadata
 
-        provider_workspace_id:
-          workspaceId,
+    },
+    {
+      onConflict: "user_id,provider"
+    }
+  )
+  .select()
+  .single();
 
-        metadata
+      console.log("UPSERT RESULT");
 
-      })
+console.log("DATA");
+console.log(data);
 
-      .select()
-
-      .single();
+console.log("ERROR");
+console.log(error);
 
   if (error) {
 
@@ -496,6 +565,15 @@ async function getIntegrationConnection(
 
 ) {
 
+  console.log("================================");
+console.log("LOOKING UP CONNECTION");
+console.log("================================");
+
+console.log({
+    userId,
+    provider
+});
+
   const {
 
     data,
@@ -514,6 +592,14 @@ async function getIntegrationConnection(
 
     .maybeSingle();
 
+console.log("LOOKUP RESULT");
+
+console.log("DATA");
+console.log(data);
+
+console.log("ERROR");
+console.log(error);
+
   if (error) {
 
     throw error;
@@ -522,11 +608,13 @@ async function getIntegrationConnection(
 
   if (!data) {
 
+    console.log("NO CONNECTION FOUND");
+
     return null;
 
-  }
+}
 
-  return {
+  const connection = {
 
     ...data,
 
@@ -540,8 +628,18 @@ async function getIntegrationConnection(
         data.encrypted_refresh_token
       )
 
-  };
+};
 
+console.log("RETURNING CONNECTION");
+
+console.log({
+    id: connection.id,
+    provider: connection.provider,
+    userId: connection.user_id,
+    status: connection.status
+});
+
+return connection;
 }
 
 /**
@@ -560,6 +658,14 @@ async function updateIntegrationTokens({
   expiresAt
 
 }) {
+
+  console.log("UPDATING TOKENS");
+
+console.log({
+    provider,
+    userId,
+    expiresAt
+});
 
   const {
 
@@ -594,6 +700,11 @@ async function updateIntegrationTokens({
     .select()
 
     .single();
+    console.log("OAUTH STATE SAVED");
+
+console.log(data);
+
+console.log(error);
 
   if (error) {
 
@@ -680,116 +791,6 @@ async function updateIntegrationStatus({
   }
 
   return data;
-
-}
-
-
-/* ------------------------------------------------------------------ */
-/* OAuth State Storage                                                */
-/* ------------------------------------------------------------------ */
-
-async function saveOAuthState({
-
-  state,
-
-  userId,
-
-  provider,
-
-  codeVerifier,
-
-  expiresAt
-
-}) {
-
-  const { data, error } =
-
-    await supabaseAdmin
-
-      .from("integration_oauth_states")
-
-      .insert({
-
-        state,
-
-        user_id: userId,
-
-        provider,
-
-        code_verifier: codeVerifier,
-
-        expires_at: expiresAt
-
-      })
-
-      .select()
-
-      .single();
-
-
-  if (error) {
-
-    throw error;
-
-  }
-
-
-  return data;
-
-}
-
-
-
-async function getOAuthState(state) {
-
-  const {
-
-    data,
-
-    error
-
-  } = await supabaseAdmin
-
-    .from("integration_oauth_states")
-
-    .select("*")
-
-    .eq("state", state)
-
-    .maybeSingle();
-
-
-  if (error) {
-
-    throw error;
-
-  }
-
-
-  return data;
-
-}
-
-
-
-async function deleteOAuthState(state) {
-
-  const { error } =
-
-    await supabaseAdmin
-
-      .from("integration_oauth_states")
-
-      .delete()
-
-      .eq("state", state);
-
-
-  if (error) {
-
-    throw error;
-
-  }
 
 }
 

@@ -73,8 +73,21 @@ async function upload(options = {}) {
     provider: "google-drive"
   });
 
+  console.log("================================");
+console.log("UPLOADING TO GOOGLE DRIVE");
+console.log("================================");
+
+console.log({
+  fileName: metadata.name,
+  mimeType: metadata.mimeType,
+  size: Buffer.isBuffer(file)
+    ? file.length
+    : String(file).length
+});
+
+
   const response = await http.post(
-    "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
+    "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,webViewLink,webContentLink",
     multipartBody,
     {
       timeout,
@@ -85,6 +98,12 @@ async function upload(options = {}) {
       }
     }
   );
+
+  console.log("================================");
+console.log("GOOGLE DRIVE RESPONSE");
+console.log("================================");
+
+console.log(response.data);
 
   logger.info("Google Drive upload completed.", {
     provider: "google-drive",

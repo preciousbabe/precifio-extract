@@ -5,10 +5,13 @@ const INTEGRATION_API = "/.netlify/functions";
  *
  * Starts the OAuth flow for any provider.
  */
-export async function connectIntegration(
- provider,
- userId
-) {
+export async function connectIntegration({
+
+  provider,
+
+  userId
+
+}) {
 
   if (!provider) {
     throw new Error("Provider is required.");
@@ -37,7 +40,10 @@ export async function connectIntegration(
 
   );
 
-  const result = await res.json();
+const result = await res.json();
+
+console.log("CONNECT RESPONSE:", result);
+console.log("AUTHORIZE URL:", result.authorizeUrl);
 
   if (!res.ok) {
 
@@ -59,8 +65,12 @@ export async function connectIntegration(
 
   }
 
-  window.location.href =
-    result.authorizeUrl;
+console.log("FULL RESPONSE:", result);
+console.log("AUTHORIZE URL:", result.authorizeUrl);
+
+debugger;
+
+// window.location.href = result.authorizeUrl;
 
 }
 
@@ -107,20 +117,13 @@ export async function disconnectIntegration(
 
   const result = await res.json();
 
-  if (!res.ok) {
+  console.log("========== FRONTEND ==========");
+console.log(result);
+console.log("authorizeUrl =", result.authorizeUrl);
+console.log("==============================");
 
-    throw new Error(
-
-      result.error ||
-
-      "Disconnect failed."
-
-    );
-
-  }
-
-  return result;
-
+// STOP HERE
+return;
 }
 
 
