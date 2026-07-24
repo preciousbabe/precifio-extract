@@ -19,7 +19,7 @@ const validation = require("../validation");
  *
  * @param {Object} options
  * @param {string} options.accessToken
- * @param {string} options.path
+ * @param {Object|string} options.metadata
  * @param {Buffer|string|Uint8Array} options.file
  * @param {string} [options.conflictBehavior]
  * @param {number} [options.timeout]
@@ -31,7 +31,7 @@ async function upload(options = {}) {
 
   const {
     accessToken,
-    path,
+    metadata,
     file,
     conflictBehavior = "replace",
     timeout,
@@ -42,23 +42,41 @@ async function upload(options = {}) {
     throw new Error("Missing OneDrive access token.");
   }
 
-  if (!validation.isNonEmptyString(path)) {
-    throw new Error("Missing OneDrive destination path.");
+  if (!metadata) {
+    throw new Error("Missing OneDrive metadata.");
   }
 
   if (!file) {
     throw new Error("Missing file.");
   }
 
-  logger.info("Uploading file to OneDrive.", {
-    provider: "onedrive",
-    path
-  });
+  const fileName = typeof metadata === "string"
+    ? JSON.parse(metadata).name
+    : metadata.name;
 
-  const encodedPath = path
+  const encodedPath = `/${fileName}`
     .split("/")
     .map(encodeURIComponent)
     .join("/");
+
+  logger.info("Uploading file to OneDrive.", {
+    provider: "onedrive",
+    fileName
+  });
+
+  console.log("================================");
+  console.log("UPLOADING TO ONEDRIVE");
+  console.log("================================");
+
+  console.log({
+    fileName,
+    mimeType: typeof metadata === "string"
+      ? JSON.parse(metadata).mimeType
+      : metadata.mimeType,
+    size: Buffer.isBuffer(file)
+      ? file.length
+      : String(file).length
+  });
 
   const endpoint =
     `https://graph.microsoft.com/v1.0/me/drive/root:/${encodedPath}:/content?@microsoft.graph.conflictBehavior=${encodeURIComponent(conflictBehavior)}`;
@@ -76,9 +94,15 @@ async function upload(options = {}) {
     }
   );
 
+  console.log("================================");
+  console.log("ONEDRIVE RESPONSE");
+  console.log("================================");
+
+  console.log(response.data);
+
   logger.info("OneDrive upload completed.", {
     provider: "onedrive",
-    path,
+    fileName,
     status: response.status
   });
 

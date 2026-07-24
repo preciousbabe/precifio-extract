@@ -14,6 +14,14 @@
  *   exportFile
  * }
  *
+ * exportFile:
+ * {
+ *    buffer,
+ *    mimeType,
+ *    extension,
+ *    fileName
+ * }
+ *
  * ------------------------------------------------------------------------
  */
 
@@ -54,17 +62,40 @@ async function upload(options = {}) {
     );
   }
 
+  console.log("================================");
+  console.log("ONEDRIVE ADAPTER");
+  console.log("================================");
+
+  console.log({
+    hasConnection: !!connection,
+    hasAccessToken: !!connection.access_token,
+    fileName,
+    mimeType,
+    size: buffer.length
+  });
+
+  /*
+   * OneDrive metadata.
+   */
+
+  const metadata = {
+    name: fileName,
+    mimeType
+  };
+
+  /*
+   * Delegate upload.
+   */
+
   const response =
     await provider.upload({
 
       accessToken:
         connection.access_token,
 
-      file: buffer,
+      metadata,
 
-      fileName,
-
-      mimeType
+      file: buffer
 
     });
 
@@ -85,11 +116,15 @@ async function upload(options = {}) {
 
       null,
 
+    webContentLink:
+      response.data["@microsoft.graph.downloadUrl"] ||
+
+      null,
+
     raw:
       response.data
 
   };
-
 }
 
 module.exports = Object.freeze({

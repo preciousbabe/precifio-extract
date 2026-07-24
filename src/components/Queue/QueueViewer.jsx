@@ -23,6 +23,29 @@ const IconClose = () => (
   </svg>
 );
 
+const IconTrash = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="3 6 5 6 21 6"/>
+    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+    <line x1="10" y1="11" x2="10" y2="17"/>
+    <line x1="14" y1="11" x2="14" y2="17"/>
+  </svg>
+);
+
+const IconEye = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+    <circle cx="12" cy="12" r="3"/>
+  </svg>
+);
+
+const IconEyeOff = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+    <line x1="1" y1="1" x2="23" y2="23"/>
+  </svg>
+);
+
 const IconPdf = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
@@ -221,7 +244,7 @@ function shouldRenderAsTable(segment) {
 }
 
 function getTableColumns(fields) {
-  const firstVal = fields[0].value;
+  const firstVal = fields[0]?.value;
   if (firstVal && typeof firstVal === "object" && !Array.isArray(firstVal)) {
     return Object.keys(firstVal);
   }
@@ -234,7 +257,16 @@ function formatLabel(key) {
 
 // ─── Sub-components ─────────────────────────────────────────────────
 
-function KVRow({ label, value, confidence }) {
+function KVRow({
+  label,
+  value,
+  confidence,
+  onChange,
+  onLabelChange,
+  onDelete,
+  dirty,
+  isEditing,
+}) {
   const pct = Math.round((confidence || 0) * 100);
   const confClass =
     pct < 50 ? "queue-kv-confidence very-low"
@@ -242,32 +274,81 @@ function KVRow({ label, value, confidence }) {
     : "queue-kv-confidence";
 
   return (
-    <div className="queue-kv-row">
-      <div className="queue-kv-label">{label}</div>
-      <div className="queue-kv-value">{renderValue(value)}</div>
+    <div className={`queue-kv-row ${dirty ? "queue-kv-row--dirty" : ""}`}>
+      <div className="queue-kv-label">
+        {isEditing ? (
+          <input
+            className="queue-edit-label"
+            value={label ?? ""}
+            onChange={(e) => onLabelChange?.(e.target.value)}
+          />
+        ) : (
+          label
+        )}
+      </div>
+      <div className="queue-kv-value">
+        {isEditing ? (
+          <input
+            className="queue-edit-input"
+            value={value ?? ""}
+            onChange={(e) => onChange?.(e.target.value)}
+          />
+        ) : (
+          renderValue(value)
+        )}
+      </div>
       <div className={confClass}>{pct}%</div>
+      {isEditing && (
+        <button
+          className="field-delete-btn"
+          onClick={onDelete}
+          title="Remove field"
+          type="button"
+        >
+          <IconTrash />
+        </button>
+      )}
     </div>
   );
 }
 
-function DataTable({ fields }) {
+function DataTable({ fields, isEditing, segmentIndex, setSegments, dirtyFields, setDirtyFields }) {
   const columns = getTableColumns(fields);
-  const moneyCols = [
-    "unit_price", "total", "subtotal", "discount", "tax", "shipping",
-    "amount_due", "amount_paid", "balance_due", "price", "cost",
-  ];
+  const moneyCols = ["unit_price", "total", "subtotal", "discount", "tax", "shipping", "amount_due", "amount_paid", "balance_due", "price", "cost"];
   const numberCols = ["qty", "quantity", "amount", "count", "line_number"];
+
+  const handleCellChange = (rowIdx, col, newValue) => {
+    setSegments((prev) => {
+      const copy = JSON.parse(JSON.stringify(prev));
+      copy[segmentIndex].fields[rowIdx].value[col] = newValue;
+      return copy;
+    });
+    setDirtyFields((prev) => ({
+      ...prev,
+      [`${segmentIndex}-${rowIdx}-${col}`]: true,
+    }));
+  };
+
+  const handleDeleteRow = (rowIdx) => {
+    setSegments((prev) => {
+      const copy = JSON.parse(JSON.stringify(prev));
+      copy[segmentIndex].fields.splice(rowIdx, 1);
+      return copy;
+    });
+    setDirtyFields((prev) => ({
+      ...prev,
+      [`${segmentIndex}-row-deleted-${rowIdx}`]: true,
+    }));
+  };
 
   return (
     <div className="table-scroll">
       <table className="data-table">
         <thead className="table-head">
           <tr>
+            {isEditing && <th className="table-th" style={{ width: "44px" }}></th>}
             {columns.map((col) => (
-              <th
-                key={col}
-                className={moneyCols.includes(col) || numberCols.includes(col) ? "table-th text-center" : "table-th"}
-              >
+              <th key={col} className={moneyCols.includes(col) || numberCols.includes(col) ? "table-th text-center" : "table-th"}>
                 {formatLabel(col)}
               </th>
             ))}
@@ -280,16 +361,40 @@ function DataTable({ fields }) {
             const pct = Math.round((field.confidence || 0) * 100);
             return (
               <tr key={idx} className={idx % 2 ? "table-row-alt" : ""}>
+                {isEditing && (
+                  <td className="table-td" style={{ width: "44px", textAlign: "center", verticalAlign: "middle" }}>
+                    <button
+                      className="field-delete-btn"
+                      onClick={() => handleDeleteRow(idx)}
+                      title="Remove row"
+                      type="button"
+                    >
+                      <IconTrash />
+                    </button>
+                  </td>
+                )}
                 {columns.map((col) => {
                   const v = row[col];
                   const isMoney = moneyCols.includes(col);
                   const isNum = numberCols.includes(col);
+                  const isDirty = dirtyFields[`${segmentIndex}-${idx}-${col}`];
+
                   return (
-                    <td
-                      key={col}
-                      className={["table-td", isMoney || isNum ? "text-right" : "", isMoney ? "money-cell" : ""].filter(Boolean).join(" ")}
-                    >
-                      {renderValue(v)}
+                    <td key={col} className={[
+                      "table-td", 
+                      isMoney || isNum ? "text-right" : "", 
+                      isMoney ? "money-cell" : "",
+                      isDirty ? "table-td--dirty" : ""
+                    ].filter(Boolean).join(" ")}>
+                      {isEditing ? (
+                        <input
+                          className="table-edit-input"
+                          value={v ?? ""}
+                          onChange={(e) => handleCellChange(idx, col, e.target.value)}
+                        />
+                      ) : (
+                        renderValue(v)
+                      )}
                     </td>
                   );
                 })}
@@ -307,7 +412,19 @@ function DataTable({ fields }) {
 
 function renderValue(value) {
   if (value === null || value === undefined) return "—";
-  if (typeof value === "string" || typeof value === "number") return String(value);
+
+  // Belt-and-suspenders: never render { value: "x" } as a table with "Value" label
+  if (typeof value === "object" && !Array.isArray(value)) {
+    const keys = Object.keys(value);
+    if (keys.length === 1 && keys[0] === "value") {
+      return renderValue(value.value);
+    }
+  }
+
+  if (typeof value === "string") return value;
+  if (typeof value === "number") return String(value);
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+
   if (Array.isArray(value)) {
     if (value.length === 0) return "—";
     if (value.every((v) => typeof v === "string" || typeof v === "number")) {
@@ -321,7 +438,13 @@ function renderValue(value) {
       </ul>
     );
   }
+
   if (typeof value === "object") {
+    const keys = Object.keys(value);
+    if (keys.length === 1 && keys[0] === "value") {
+      return renderValue(value.value);
+    }
+
     return (
       <table className="nested-table">
         <tbody>
@@ -335,11 +458,11 @@ function renderValue(value) {
       </table>
     );
   }
+
   return String(value);
 }
 
-
-function ExportDropdown({ item, segments, onExport, user }) {
+function ExportDropdown({ item, segments, onExport, user, disabled }) {
   const [open, setOpen] = useState(false);
   const [submenu, setSubmenu] = useState(null);
   const [copied, setCopied] = useState(false);
@@ -359,136 +482,132 @@ function ExportDropdown({ item, segments, onExport, user }) {
   }, [open]);
 
   const handleExport = async (format) => {
-  setExporting(format);
-  try {
-    const payload = {
-      fileName: item.name,
-      documentSummary: item.result?.documentSummary,
-      segments,
-      metadata: item.result?.metadata
-    };
+    if (disabled) return;
+    setExporting(format);
+    try {
+      const payload = {
+        fileName: item.name,
+        documentSummary: item.result?.documentSummary,
+        segments,
+        metadata: item.result?.metadata
+      };
 
-    switch (format) {
-      case "json":
-        await downloadExport({ payload, format: "json" });
-        break;
-      case "csv":
-        await downloadExport({ payload, format: "csv" });
-        break;
-      case "excel":
-        await downloadExport({ payload, format: "xlsx" });
-        break;
-      case "pdf":
-        await downloadExport({ payload, format: "pdf" });
-        break;
-      case "docx":
-        await downloadExport({ payload, format: "docx" });
-        break;
+      switch (format) {
+        case "json":
+          await downloadExport({ payload, format: "json" });
+          break;
+        case "csv":
+          await downloadExport({ payload, format: "csv" });
+          break;
+        case "excel":
+          await downloadExport({ payload, format: "xlsx" });
+          break;
+        case "pdf":
+          await downloadExport({ payload, format: "pdf" });
+          break;
+        case "docx":
+          await downloadExport({ payload, format: "docx" });
+          break;
 
-      case "xero-pdf":
-      case "xero-docx":
-      case "xero-json":
-      case "xero-csv":
-      case "xero-xlsx":
-      case "quickbooks-pdf":
-      case "quickbooks-docx":
-      case "quickbooks-json":
-      case "quickbooks-csv":
-      case "quickbooks-xlsx":
-      case "google-drive-pdf":
-      case "google-drive-docx":
-      case "google-drive-json":
-      case "google-drive-csv":
-      case "google-drive-xlsx":
-      case "dropbox-pdf":
-      case "dropbox-docx":
-      case "dropbox-json":
-      case "dropbox-csv":
-      case "dropbox-xlsx":
-      case "onedrive-pdf":
-      case "onedrive-docx":
-      case "onedrive-json":
-      case "onedrive-csv":
-      case "onedrive-xlsx":
-      case "webhook":
-      case "slack":
-        if (!user) {
-          alert("Please sign in to use integrations.");
-          setExporting(null);
-          return;
-        }
+        case "xero-pdf":
+        case "xero-docx":
+        case "xero-json":
+        case "xero-csv":
+        case "xero-xlsx":
+        case "quickbooks-pdf":
+        case "quickbooks-docx":
+        case "quickbooks-json":
+        case "quickbooks-csv":
+        case "quickbooks-xlsx":
+        case "google-drive-pdf":
+        case "google-drive-docx":
+        case "google-drive-json":
+        case "google-drive-csv":
+        case "google-drive-xlsx":
+        case "dropbox-pdf":
+        case "dropbox-docx":
+        case "dropbox-json":
+        case "dropbox-csv":
+        case "dropbox-xlsx":
+        case "onedrive-pdf":
+        case "onedrive-docx":
+        case "onedrive-json":
+        case "onedrive-csv":
+        case "onedrive-xlsx":
+        case "webhook":
+        case "slack":
+          if (!user) {
+            alert("Please sign in to use integrations.");
+            setExporting(null);
+            return;
+          }
 
-        // ─── FIXED PARSING ─────────────────────────────
-        // Don't use format.split("-") — it breaks on "google-drive-pdf"
-        const oauthProviders = ["google-drive", "dropbox", "onedrive", "xero", "quickbooks"];
-        
-        let cloudProvider = format;
-        let exportFormat = DEFAULT_UPLOAD_FORMAT;
+          const oauthProviders = ["google-drive", "dropbox", "onedrive", "xero", "quickbooks"];
 
-        // Find the longest matching provider prefix
-        for (const p of oauthProviders.sort((a, b) => b.length - a.length)) {
-          if (format === p) {
-            cloudProvider = p;
+          let cloudProvider = format;
+          let exportFormat = DEFAULT_UPLOAD_FORMAT;
+
+          for (const p of oauthProviders.sort((a, b) => b.length - a.length)) {
+            if (format === p) {
+              cloudProvider = p;
+              exportFormat = DEFAULT_UPLOAD_FORMAT;
+              break;
+            }
+            if (format.startsWith(p + "-")) {
+              cloudProvider = p;
+              exportFormat = format.slice(p.length + 1);
+              break;
+            }
+          }
+
+          if (!oauthProviders.includes(cloudProvider)) {
+            cloudProvider = format;
             exportFormat = DEFAULT_UPLOAD_FORMAT;
-            break;
           }
-          if (format.startsWith(p + "-")) {
-            cloudProvider = p;
-            exportFormat = format.slice(p.length + 1); // everything after "provider-"
-            break;
+
+          if (oauthProviders.includes(cloudProvider)) {
+            await connectIntegration({
+              provider: cloudProvider,
+              userId: user.id,
+              model: buildExportModel(payload),
+              exportFormat,
+              options: {}
+            });
+          } else {
+            await sendToIntegration({
+              provider: cloudProvider,
+              payload,
+              userId: user.id,
+              exportFormat
+            });
           }
-        }
+          break;
 
-        // For non-OAuth providers (webhook, slack), format IS the provider
-        if (!oauthProviders.includes(cloudProvider)) {
-          cloudProvider = format;
-          exportFormat = DEFAULT_UPLOAD_FORMAT;
-        }
-        // ──────────────────────────────────────────────
+        case "email":
+          await sendEmail(payload);
+          break;
 
-        if (oauthProviders.includes(cloudProvider)) {
-          await connectIntegration({
-            provider: cloudProvider,
-            userId: user.id,
-            model: buildExportModel(payload),
-            exportFormat,
-            options: {}
-          });
-        } else {
-          await sendToIntegration({
-            provider: cloudProvider,
-            payload,
-            userId: user.id,
-            exportFormat
-          });
-        }
-        break;
+        case "clipboard":
+          await copyToClipboard(payload);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+          break;
 
-      case "email":
-        await sendEmail(payload);
-        break;
+        default:
+          console.warn("Unknown export format:", format);
+          break;
+      }
 
-      case "clipboard":
-        await copyToClipboard(payload);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-        break;
-
-      default:
-        console.warn("Unknown export format:", format);
-        break;
+      if (onExport) onExport(format);
+    } catch (err) {
+      console.error("Export failed:", err);
+      alert(err.message || "Export failed.");
+    } finally {
+      setExporting(null);
+      setOpen(false);
+      setSubmenu(null);
     }
-
-    if (onExport) onExport(format);
-  } catch (err) {
-    console.error("Export failed:", err);
-    alert(err.message || "Export failed.");
-  } finally {
-    setExporting(null);
-    setOpen(false);
-    setSubmenu(null);
-  }
-};
+  };
 
   const EXPORT_FORMATS = [
     { key: "pdf", label: "PDF", icon: <IconPdf /> },
@@ -501,18 +620,24 @@ function ExportDropdown({ item, segments, onExport, user }) {
   return (
     <div className="export-wrap" ref={menuRef}>
       <button
-        className={`export-trigger ${open ? "export-trigger--active" : ""}`}
-        onClick={() => setOpen(!open)}
-        disabled={!!exporting}
+        className={`export-trigger ${open ? "export-trigger--active" : ""} ${disabled ? "export-trigger--disabled" : ""}`}
+        onClick={() => !disabled && setOpen(!open)}
+        disabled={!!exporting || disabled}
+        title={disabled ? "Finish editing and save changes before exporting" : ""}
       >
         <IconDownload />
-        <span>{exporting ? "Exporting…" : copied ? "Copied!" : "Export / Send"}</span>
+        <span>
+          {exporting ? "Exporting…" 
+            : copied ? "Copied!" 
+            : disabled ? "Save to Export" 
+            : "Export / Send"}
+        </span>
         <span className="export-chevron" style={{ transform: open ? "rotate(180deg)" : "rotate(0deg)" }}>
           <IconChevronUp />
         </span>
       </button>
 
-      {open && (
+      {open && !disabled && (
         <div className="export-menu">
           <div className="export-header">Download to device</div>
 
@@ -634,8 +759,20 @@ function ExportDropdown({ item, segments, onExport, user }) {
 export default function QueueViewer({ item, onClose, onExport }) {
   const { user } = useAuth();
   const extraction = item?.result ?? {};
+  const [isEditing, setIsEditing] = useState(false);
+  const [showOriginal, setShowOriginal] = useState(false);
   const metadata = extraction.metadata ?? {};
-  const segments = extraction.segments ?? [];
+  const [segments, setSegments] = useState(() => {
+    return JSON.parse(JSON.stringify(extraction.segments ?? []));
+  });
+
+  const [dirtyFields, setDirtyFields] = useState({});
+  const hasChanges = Object.keys(dirtyFields).length > 0;
+
+  // Determine which segments to display
+  const displaySegments = (isEditing && showOriginal)
+    ? extraction.originalSegments ?? segments
+    : segments;
 
   useEffect(() => {
     if (!item) {
@@ -647,11 +784,63 @@ export default function QueueViewer({ item, onClose, onExport }) {
   }, [item]);
 
   useEffect(() => {
+    setSegments(JSON.parse(JSON.stringify(extraction.segments ?? [])));
+    setDirtyFields({});
+    setShowOriginal(false);
+  }, [item]);
+
+  useEffect(() => {
     if (!item) return;
     const handleKey = (e) => { if (e.key === "Escape") onClose(); };
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
   }, [item, onClose]);
+
+  async function handleSaveChanges() {
+    if (!user) {
+      alert("Please sign in to save corrections.");
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('precifio_token');
+      if (!token) {
+        alert("Session expired. Please sign in again.");
+        return;
+      }
+
+      const response = await fetch("/.netlify/functions/save-pattern", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          extractionId: extraction.extractionId,
+          documentFingerprint: extraction.metadata?.documentFingerprint,
+          documentType: extraction.documentType,
+          originalSegments: extraction.originalSegments,
+          editedSegments: segments,
+          userId: user.id,
+        }),
+      });
+
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.message || "Failed to save changes.");
+      }
+
+      const data = await response.json();
+      alert(`Changes saved. ${data.correctionsApplied} correction rules learned.`);
+
+      setDirtyFields({});
+      setIsEditing(false);
+      setShowOriginal(false);
+    } catch (err) {
+      console.error(err);
+      alert(err.message || "Unable to save changes.");
+    }
+  }
 
   if (!item) return null;
 
@@ -661,7 +850,14 @@ export default function QueueViewer({ item, onClose, onExport }) {
         {/* Header */}
         <div className="queue-header">
           <div className="queue-header-left">
-            <h2 className="queue-header-title">{item.name}</h2>
+            <div className="queue-header-title-wrap">
+              <h2 className="queue-header-title">{item.name}</h2>
+              {isEditing && (
+                <div className="editing-banner">
+                  ✏ Editing Mode
+                </div>
+              )}
+            </div>
             <p className="queue-header-subtitle">{extraction.documentSummary || "No summary available"}</p>
           </div>
           <button className="queue-close-btn" onClick={onClose} title="Close">
@@ -679,28 +875,95 @@ export default function QueueViewer({ item, onClose, onExport }) {
 
         {/* Body */}
         <div className="queue-body">
-          {item.error && !segments.length && (
+          {item.error && !displaySegments.length && (
             <div className="error-box">
               <h3 style={{ fontSize: "15px", fontWeight: 700, marginBottom: "8px", marginTop: 0 }}>Processing Error</h3>
               <p style={{ margin: 0, lineHeight: 1.6 }}>{item.error}</p>
             </div>
           )}
 
-          {segments.length === 0 && !item.error && (
+          {displaySegments.length === 0 && !item.error && (
             <div className="empty-state">No extracted fields available.</div>
           )}
 
-          {segments.map((segment, index) => {
+          {displaySegments.map((segment, index) => {
             const isTable = shouldRenderAsTable(segment);
+
+            const handleDeleteField = (fieldIdx) => {
+              setSegments((prev) => {
+                const copy = JSON.parse(JSON.stringify(prev));
+                copy[index].fields.splice(fieldIdx, 1);
+                return copy;
+              });
+              setDirtyFields((prev) => ({
+                ...prev,
+                [`${index}-${fieldIdx}-deleted`]: true,
+              }));
+            };
+
             return (
               <div key={index} className="queue-segment">
-                <h3 className="queue-segment-title">{segment.segment_name}</h3>
+                <h3 className="queue-segment-title">
+                  {segment.segment_name}
+                  {isEditing && (
+                    <span className="segment-edit-hint">— {segment.fields?.length || 0} fields</span>
+                  )}
+                </h3>
+
+                {isEditing && (
+                  <button
+                    className={`see-original-btn ${showOriginal ? "active" : ""}`}
+                    onClick={() => setShowOriginal(!showOriginal)}
+                    type="button"
+                  >
+                    {showOriginal ? <IconEyeOff /> : <IconEye />}
+                    {showOriginal ? "Show Edited" : "See Original"}
+                  </button>
+                )}
+
                 {isTable ? (
-                  <DataTable fields={segment.fields || []} />
+                  <DataTable
+                    fields={segment.fields || []}
+                    isEditing={isEditing}
+                    segmentIndex={index}
+                    setSegments={setSegments}
+                    dirtyFields={dirtyFields}
+                    setDirtyFields={setDirtyFields}
+                  />
                 ) : (
                   <div>
                     {(segment.fields || []).map((field, idx) => (
-                      <KVRow key={idx} label={field.label} value={field.value} confidence={field.confidence} />
+                      <KVRow
+                        key={idx}
+                        label={field.label}
+                        value={field.value}
+                        confidence={field.confidence}
+                        dirty={dirtyFields[`${index}-${idx}-value`] || dirtyFields[`${index}-${idx}-label`] || dirtyFields[`${index}-${idx}-deleted`]}
+                        onChange={(newValue) => {
+                          setSegments((prev) => {
+                            const copy = JSON.parse(JSON.stringify(prev));
+                            copy[index].fields[idx].value = newValue;
+                            return copy;
+                          });
+                          setDirtyFields((prev) => ({
+                            ...prev,
+                            [`${index}-${idx}-value`]: true,
+                          }));
+                        }}
+                        onLabelChange={(newLabel) => {
+                          setSegments((prev) => {
+                            const copy = JSON.parse(JSON.stringify(prev));
+                            copy[index].fields[idx].label = newLabel;
+                            return copy;
+                          });
+                          setDirtyFields((prev) => ({
+                            ...prev,
+                            [`${index}-${idx}-label`]: true,
+                          }));
+                        }}
+                        onDelete={() => handleDeleteField(idx)}
+                        isEditing={isEditing}
+                      />
                     ))}
                   </div>
                 )}
@@ -712,9 +975,41 @@ export default function QueueViewer({ item, onClose, onExport }) {
         {/* Export bar */}
         <div className="export-bar">
           <div className="export-label">
-            <IconDownload /> Export or send this extraction
+            <IconDownload />
+            {isEditing ? "Finish editing to export" : "Export or send this extraction"}
           </div>
-          <ExportDropdown item={item} segments={segments} onExport={onExport} user={user} />
+
+          <div className="export-actions">
+            {hasChanges && (
+              <button className="save-review-btn" onClick={handleSaveChanges}>
+                Save Changes
+              </button>
+            )}
+
+            <button
+              className={`edit-toggle-btn ${isEditing ? "editing" : ""}`}
+              onClick={() => {
+                if (isEditing && hasChanges) {
+                  const confirmDiscard = window.confirm("You have unsaved changes. Discard them?");
+                  if (!confirmDiscard) return;
+                  setSegments(JSON.parse(JSON.stringify(extraction.segments ?? [])));
+                  setDirtyFields({});
+                }
+                setIsEditing(!isEditing);
+                setShowOriginal(false);
+              }}
+            >
+              {isEditing ? "Cancel Editing" : "Edit Extraction"}
+            </button>
+
+            <ExportDropdown
+              item={item}
+              segments={segments}
+              onExport={onExport}
+              user={user}
+              disabled={isEditing}
+            />
+          </div>
         </div>
       </div>
     </div>

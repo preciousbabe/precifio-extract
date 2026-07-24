@@ -14,6 +14,14 @@
  *   exportFile
  * }
  *
+ * exportFile:
+ * {
+ *    buffer,
+ *    mimeType,
+ *    extension,
+ *    fileName
+ * }
+ *
  * ------------------------------------------------------------------------
  */
 
@@ -44,6 +52,7 @@ async function upload(options = {}) {
 
   const {
     buffer,
+    mimeType,
     fileName
   } = exportFile;
 
@@ -53,16 +62,40 @@ async function upload(options = {}) {
     );
   }
 
+  console.log("================================");
+  console.log("DROPBOX ADAPTER");
+  console.log("================================");
+
+  console.log({
+    hasConnection: !!connection,
+    hasAccessToken: !!connection.access_token,
+    fileName,
+    mimeType,
+    size: buffer.length
+  });
+
+  /*
+   * Dropbox metadata.
+   */
+
+  const metadata = {
+    name: fileName,
+    mimeType
+  };
+
+  /*
+   * Delegate upload.
+   */
+
   const response =
     await provider.upload({
 
       accessToken:
         connection.access_token,
 
-      file: buffer,
+      metadata,
 
-      path:
-        `/${fileName}`
+      file: buffer
 
     });
 
@@ -76,7 +109,9 @@ async function upload(options = {}) {
     fileName,
 
     fileId:
-      response.data.id,
+      response.data.id ||
+
+      null,
 
     path:
       response.data.path_display ||
@@ -94,7 +129,6 @@ async function upload(options = {}) {
       response.data
 
   };
-
 }
 
 module.exports = Object.freeze({

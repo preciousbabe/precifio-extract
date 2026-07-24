@@ -19,7 +19,7 @@ const validation = require("../validation");
  *
  * @param {Object} options
  * @param {string} options.accessToken
- * @param {string} options.path
+ * @param {Object|string} options.metadata
  * @param {Buffer|string|Uint8Array} options.file
  * @param {boolean} [options.overwrite]
  * @param {boolean} [options.autorename]
@@ -33,7 +33,7 @@ async function upload(options = {}) {
 
   const {
     accessToken,
-    path,
+    metadata,
     file,
     overwrite = true,
     autorename = false,
@@ -46,17 +46,37 @@ async function upload(options = {}) {
     throw new Error("Missing Dropbox access token.");
   }
 
-  if (!validation.isNonEmptyString(path)) {
-    throw new Error("Missing Dropbox destination path.");
+  if (!metadata) {
+    throw new Error("Missing Dropbox metadata.");
   }
 
   if (!file) {
     throw new Error("Missing file.");
   }
 
+  const fileName = typeof metadata === "string"
+    ? JSON.parse(metadata).name
+    : metadata.name;
+
+  const path = `/${fileName}`;
+
   logger.info("Uploading file to Dropbox.", {
     provider: "dropbox",
-    path
+    fileName
+  });
+
+  console.log("================================");
+  console.log("UPLOADING TO DROPBOX");
+  console.log("================================");
+
+  console.log({
+    fileName,
+    mimeType: typeof metadata === "string"
+      ? JSON.parse(metadata).mimeType
+      : metadata.mimeType,
+    size: Buffer.isBuffer(file)
+      ? file.length
+      : String(file).length
   });
 
   const response = await http.post(
@@ -78,9 +98,15 @@ async function upload(options = {}) {
     }
   );
 
+  console.log("================================");
+  console.log("DROPBOX RESPONSE");
+  console.log("================================");
+
+  console.log(response.data);
+
   logger.info("Dropbox upload completed.", {
     provider: "dropbox",
-    path,
+    fileName,
     status: response.status
   });
 

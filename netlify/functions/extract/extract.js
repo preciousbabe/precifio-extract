@@ -6,6 +6,7 @@ const { cleanOCR } = require("../utils/clean-ocr");
 const AIClient = require("../utils/ai-client");
 const { createClient } = require("@supabase/supabase-js");
 const parseMultipartLib = require("parse-multipart");
+const crypto = require("crypto");
 
 function parseMultipart(event) {
   const contentType = event.headers["content-type"] || event.headers["Content-Type"];
@@ -52,6 +53,26 @@ function calculatePageCost(text) {
   return Math.min(estimatedPages, 50);
 }
 
+function applyCorrections(extractedData, corrections) {
+  if (!extractedData.segments) return extractedData;
+  
+  extractedData.segments.forEach((seg) => {
+    (seg.fields || []).forEach((field) => {
+      const key = `${seg.segment_name}.${field.label}`;
+      if (corrections[key]) {
+        field.value = corrections[key].to;
+      }
+      const labelKey = `${key}._label`;
+      if (corrections[labelKey]) {
+        field.label = corrections[labelKey].to;
+      }
+    });
+  });
+  
+  return extractedData;
+}
+
+
 exports.handler = async (event, context) => {
   context.callbackWaitsForEmptyEventLoop = false;
 
@@ -78,6 +99,7 @@ exports.handler = async (event, context) => {
   let newBalance = null;
 
   try {
+    const extractionId = crypto.randomUUID();
     const parsed = parseMultipart(event);
     const file = parsed.files[0];
 
@@ -205,6 +227,16 @@ exports.handler = async (event, context) => {
     let finalText = extraction.text;
     let extractionMethod = extraction.metadata.method;
     const cleanedText = cleanOCR(finalText || "");
+   
+  const fingerprintSource = cleanedText
+  .toLowerCase()
+  .replace(/\s+/g, " ")
+  .trim();
+
+  const documentFingerprint = crypto
+  .createHash("sha256")
+  .update(fingerprintSource.substring(0, 5000))
+  .digest("hex");
 
     if (!cleanedText || cleanedText.length < 10) {
       return {
@@ -278,6 +310,34 @@ exports.handler = async (event, context) => {
       console.log(`Reserved ${cost} credits from user ${userId}. Balance: ${newBalance}`);
     }
 
+
+    let savedPattern = null;
+let patternApplied = false;
+
+if (!isGuest && userId) {
+  const { data: patterns } = await supabase
+    .from("extraction_patterns")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("document_fingerprint", documentFingerprint)
+    .order("last_used_at", { ascending: false })
+    .limit(1);
+
+  if (patterns && patterns.length > 0) {
+    savedPattern = patterns[0];
+    patternApplied = true;
+    
+    // Update usage stats
+    await supabase
+      .from("extraction_patterns")
+      .update({ 
+        usage_count: patterns[0].usage_count + 1,
+        last_used_at: new Date().toISOString()
+      })
+      .eq("id", patterns[0].id);
+  }
+}
+
     // AI extraction
     let extractedData;
     try {
@@ -326,10 +386,16 @@ exports.handler = async (event, context) => {
       };
     }
 
-    // Normalize segments for tabular detection
-    const segments = Array.isArray(extractedData.segments)
-  ? extractedData.segments
-  : [];
+
+
+    if (savedPattern && savedPattern.corrections) {
+    extractedData = applyCorrections(extractedData, savedPattern.corrections);
+   }
+
+   // Normalize and preserve original
+   const originalSegments = normalizeSegments(Array.isArray(extractedData.segments) ? extractedData.segments : []);
+   const segments = JSON.parse(JSON.stringify(originalSegments));
+
 
     // Update transaction to completed
     if (!isGuest && userId && transactionId) {
@@ -343,25 +409,41 @@ exports.handler = async (event, context) => {
       }
     }
 
+    
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
         success: true,
+        extractionId,
         isGuest,
         fileName: file.name,
         fileType: validation.mimeType,
         documentSummary: extractedData.document_summary,
+       documentType:
+     (
+       extractedData.document_type ||
+       extractedData.category ||
+       "unknown"
+     )
+     .toString()
+     .toLowerCase()
+     .trim(),
+        originalSegments,
         segments,
+        savedPattern,
         metadata: {
+          documentFingerprint,
+           patternVersion: 1,
+           processedAt: new Date().toISOString(),
           extraction: {
             ...extraction.metadata,
             finalMethod: extractionMethod,
+            originalMethod: extraction.metadata.method,
             textLength: cleanedText.length,
             wordCount: cleanedText.split(/\s+/).filter((w) => w.length > 0).length,
             estimatedPages: cost,
           },
-          aiProvider: config.ai.provider,
           creditsUsed: isGuest ? 0 : cost,
           newBalance: isGuest ? null : newBalance,
         },
@@ -383,7 +465,7 @@ exports.handler = async (event, context) => {
 /**
  * Normalize segments so line items render as tables.
  * If a segment has fields where each value is an object with the same keys,
- * keep it as-is. If values are flat strings, wrap them as objects.
+ * keep it as-is. If values are flat strings/numbers, leave them as primitives.
  */
 function normalizeSegments(segments) {
   return segments.map((seg) => {
@@ -410,17 +492,31 @@ function normalizeSegments(segments) {
       return { ...seg, fields: normalizedFields };
     }
 
-    return seg;
+    // For non-tabular segments, unwrap { value: "string" } back to primitive
+    const cleanedFields = fields.map((f) => {
+      if (f.value && typeof f.value === "object" && !Array.isArray(f.value)) {
+        const keys = Object.keys(f.value);
+        // If it's just { value: "something" }, unwrap it
+        if (keys.length === 1 && keys[0] === "value") {
+          return { ...f, value: f.value.value };
+        }
+      }
+      return f;
+    });
+
+    return { ...seg, fields: cleanedFields };
   });
 }
 
 /**
  * Try to parse a flat string into a structured object.
- * Example: "Description: Industrial CNC Machine\nSKU: CNC-X2K\nQty: 2"
+ * Returns primitive if not structured, or object if structured.
  */
 function tryParseStructured(value, label) {
-  if (value && typeof value === "object") return value;
-  if (typeof value !== "string") return { value };
+  if (value === null || value === undefined) return "";
+  if (typeof value === "number") return value;
+  if (typeof value === "object") return value;
+  if (typeof value !== "string") return String(value);
 
   const lines = value.split(/\n|\r/).filter((l) => l.trim());
   const obj = {};
@@ -435,5 +531,5 @@ function tryParseStructured(value, label) {
     }
   }
 
-  return hasStructured ? obj : { value };
+  return hasStructured ? obj : value; 
 }

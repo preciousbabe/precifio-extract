@@ -1,6 +1,9 @@
 /* ===========================
    QueueViewer.css
+   Complete Restructured Version
 =========================== */
+
+/* ─── Overlay ───────────────────────────────────────────── */
 
 .queue-overlay {
   position: fixed;
@@ -27,6 +30,8 @@
   box-shadow: none;
 }
 
+/* ─── Header ────────────────────────────────────────────── */
+
 .queue-header {
   display: flex;
   justify-content: space-between;
@@ -42,6 +47,13 @@
 .queue-header-left {
   flex: 1;
   min-width: 0;
+}
+
+.queue-header-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .queue-header-title {
@@ -82,6 +94,23 @@
   color: #ef4444;
 }
 
+/* ─── Editing Banner ────────────────────────────────────── */
+
+.editing-banner {
+  background: #dbeafe;
+  color: #1e40af;
+  padding: 5px 14px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+/* ─── Meta Bar ──────────────────────────────────────────── */
+
 .queue-meta-bar {
   display: flex;
   flex-wrap: wrap;
@@ -113,6 +142,8 @@
   font-weight: 600;
 }
 
+/* ─── Body ──────────────────────────────────────────────── */
+
 .queue-body {
   flex: 1;
   overflow-y: auto;
@@ -135,7 +166,20 @@
   padding-bottom: 12px;
   border-bottom: 2px solid #e5e7eb;
   margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
+
+.segment-edit-hint {
+  font-size: 12px;
+  font-weight: 400;
+  color: #9ca3af;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* ─── KV Rows ───────────────────────────────────────────── */
 
 .queue-kv-row {
   display: flex;
@@ -144,6 +188,24 @@
   padding: 14px 0;
   border-bottom: 1px solid #f3f4f6;
   flex-wrap: wrap;
+  position: relative;
+  transition: background 0.15s ease;
+  padding-left: 12px;
+  margin-left: -12px;
+  border-radius: 0 8px 8px 0;
+}
+
+.queue-kv-row:hover {
+  background: #f9fafb;
+}
+
+.queue-kv-row--dirty {
+  background: rgba(251, 191, 36, 0.08);
+  border-left: 3px solid #f59e0b;
+}
+
+.queue-kv-row--dirty:hover {
+  background: rgba(251, 191, 36, 0.12);
 }
 
 .queue-kv-label {
@@ -181,161 +243,128 @@
   color: #dc2626;
 }
 
-/* ===========================
-   Export Menu
-=========================== */
+/* ─── Edit Inputs ───────────────────────────────────────── */
 
-.export-wrap {
-  position: relative;
-  max-width: 100%;
-  overflow: visible;
-}
-
-.export-trigger {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 18px;
-  background: #2563eb;
-  color: #fff;
-  border: none;
-  border-radius: 12px;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 600;
-  transition: .25s;
-  box-shadow: 0 8px 20px rgba(37,99,235,.25);
-  font-family: inherit;
-}
-
-.export-trigger:hover {
-  background: #1d4ed8;
-}
-
-.export-trigger--active {
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
-}
-
-.export-chevron {
-  display: inline-flex;
-  transition: transform 0.2s;
-  margin-left: 4px;
-  opacity: 0.6;
-}
-
-.export-menu {
-  position: absolute;
-  bottom: calc(100% + 12px);
-  right: 0;
-  width: min(360px, 95vw);
-  max-height: 70vh;
-  overflow-y: auto;
-  overflow-x: visible;
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 18px;
-  padding: 10px;
-  box-shadow: 0 30px 60px rgba(0,0,0,.18);
-  z-index: 9999;
-}
-
-.export-header {
-  padding: 14px 14px 8px;
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .08em;
-  color: #9ca3af;
-}
-
-.export-divider {
-  height: 1px;
-  background: #edf2f7;
-  margin: 10px 0;
-}
-
-.export-option {
-  display: flex;
-  align-items: center;
-  gap: 14px;
+.queue-edit-input {
   width: 100%;
-  padding: 13px 14px;
-  border: none;
-  outline: none;
-  background: transparent;
-  border-radius: 12px;
-  cursor: pointer;
+  border: 1px solid #d1d5db;
+  background: #fff;
   color: #111827;
+  font: inherit;
+  padding: 8px 12px;
+  border-radius: 8px;
   font-size: 14px;
-  font-weight: 500;
-  transition: .2s;
-  font-family: inherit;
+  transition: all 0.2s ease;
 }
 
-.export-option:hover {
-  background: #f3f4f6;
+.queue-edit-input:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
 }
 
-.export-option svg {
-  flex-shrink: 0;
-}
-
-.export-label {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.queue-edit-label {
+  width: 100%;
+  border: 1px solid #d1d5db;
+  background: #fff;
+  color: #111827;
+  font: inherit;
+  padding: 8px 12px;
+  border-radius: 8px;
   font-size: 14px;
   font-weight: 600;
+  transition: all 0.2s ease;
 }
 
-.export-bar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-  padding: 16px clamp(14px, 2vw, 26px);
-  border-top: 1px solid #e5e7eb;
+.queue-edit-label:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+.queue-kv-row--dirty .queue-edit-input,
+.queue-kv-row--dirty .queue-edit-label,
+.table-td--dirty .table-edit-input {
+  border-color: #f59e0b;
+  background-color: #fffbeb;
+}
+
+.table-edit-input {
+  width: 100%;
+  border: 1px solid #d1d5db;
   background: #fff;
+  color: #111827;
+  font: inherit;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 14px;
+  transition: all 0.2s ease;
+}
+
+.table-edit-input:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+/* ─── Delete Button ─────────────────────────────────────── */
+
+.field-delete-btn {
+  background: transparent;
+  border: none;
+  color: #9ca3af;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
   flex-shrink: 0;
 }
 
-/* ===========================
-   Submenu
-=========================== */
-
-.submenu-wrap {
-  position: relative;
+.queue-kv-row:hover .field-delete-btn,
+.table-td:hover .field-delete-btn,
+.queue-overlay:has(.edit-toggle-btn.editing) .field-delete-btn {
+  opacity: 1;
 }
 
-.submenu {
-  position: absolute;
-  top: 0;
-  left: calc(100% + 6px);
-  width: 230px;
-  background: #fff;
+.field-delete-btn:hover {
+  color: #ef4444;
+  background: #fef2f2;
+}
+
+/* ─── See Original Button ───────────────────────────────── */
+
+.see-original-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background: #f3f4f6;
+  color: #4b5563;
   border: 1px solid #e5e7eb;
-  border-radius: 14px;
-  padding: 8px;
-  box-shadow: 0 18px 40px rgba(0,0,0,.18);
-  z-index: 10000;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+  margin-bottom: 12px;
 }
 
-/* Flip submenu to left side so it stays visible when menu is at right edge */
-.submenu--left {
-  left: auto;
-  right: calc(100% + 6px);
+.see-original-btn:hover {
+  background: #e5e7eb;
+  color: #111827;
 }
 
-.submenu-arrow {
-  margin-left: auto;
-  opacity: .45;
+.see-original-btn.active {
+  background: #dbeafe;
+  color: #1e40af;
+  border-color: #93c5fd;
 }
 
-/* ===========================
-   Tables
-=========================== */
+/* ─── Tables ────────────────────────────────────────────── */
 
 .data-table,
 .nested-table {
@@ -354,12 +383,14 @@
   font-weight: 700;
   background: #f9fafb;
   border-bottom: 2px solid #e5e7eb;
+  white-space: nowrap;
 }
 
 .table-td {
   padding: 14px;
   border-bottom: 1px solid #f3f4f6;
   font-size: 14px;
+  vertical-align: top;
 }
 
 .nested-th {
@@ -367,11 +398,14 @@
   text-align: left;
   padding: 6px 0;
   color: #6b7280;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .nested-td {
   padding: 6px 0;
   word-break: break-word;
+  font-size: 14px;
 }
 
 .nested-list {
@@ -385,27 +419,17 @@
   border-bottom: 1px solid #f3f4f6;
 }
 
-/* ===========================
-   States
-=========================== */
-
-.error-box {
-  background: #fef2f2;
-  border: 1px solid #fee2e2;
-  border-radius: 12px;
-  padding: 20px;
+.nested-list-item:last-child {
+  border-bottom: none;
 }
 
-.empty-state {
-  padding: 80px 20px;
-  text-align: center;
-  color: #9ca3af;
-}
+/* ─── Table States ──────────────────────────────────────── */
 
 .table-confidence {
   text-align: center;
   font-size: 12px;
   font-weight: 700;
+  white-space: nowrap;
 }
 
 .table-confidence.good {
@@ -436,8 +460,339 @@
   text-align: center;
 }
 
-/* Table horizontal scroll wrapper */
 .table-scroll {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  border-radius: 8px;
+  border: 1px solid #f3f4f6;
+}
+
+/* ─── Export Bar & Actions ──────────────────────────────── */
+
+.export-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 16px clamp(14px, 2vw, 26px);
+  border-top: 1px solid #e5e7eb;
+  background: #fff;
+  flex-shrink: 0;
+}
+
+.export-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.export-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* ─── Buttons ───────────────────────────────────────────── */
+
+.save-review-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: #10b981;
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.25);
+}
+
+.save-review-btn:hover {
+  background: #059669;
+  box-shadow: 0 6px 16px rgba(16, 185, 129, 0.35);
+  transform: translateY(-1px);
+}
+
+.save-review-btn:active {
+  transform: translateY(0);
+}
+
+.edit-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: #fff;
+  color: #374151;
+  border: 1.5px solid #d1d5db;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.edit-toggle-btn:hover {
+  border-color: #9ca3af;
+  background: #f9fafb;
+}
+
+.edit-toggle-btn.editing {
+  background: #fef3c7;
+  color: #92400e;
+  border-color: #fbbf24;
+}
+
+.edit-toggle-btn.editing:hover {
+  background: #fde68a;
+  border-color: #f59e0b;
+}
+
+/* ─── Export Dropdown ───────────────────────────────────── */
+
+.export-wrap {
+  position: relative;
+  max-width: 100%;
+  overflow: visible;
+}
+
+.export-trigger {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 18px;
+  background: #2563eb;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.25s ease;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+  font-family: inherit;
+  white-space: nowrap;
+}
+
+.export-trigger:hover:not(:disabled) {
+  background: #1d4ed8;
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.35);
+  transform: translateY(-1px);
+}
+
+.export-trigger:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.export-trigger--active {
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+}
+
+.export-trigger--disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: #93c5fd;
+  box-shadow: none;
+}
+
+.export-trigger--disabled:hover {
+  transform: none;
+  background: #93c5fd;
+}
+
+.export-chevron {
+  display: inline-flex;
+  transition: transform 0.2s ease;
+  margin-left: 4px;
+  opacity: 0.7;
+}
+
+/* ─── Export Menu ───────────────────────────────────────── */
+
+.export-menu {
+  position: absolute;
+  bottom: calc(100% + 12px);
+  right: 0;
+  width: min(320px, calc(100vw - 32px));
+  max-height: min(70vh, 500px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  padding: 8px;
+  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.15);
+  z-index: 999999;
+}
+
+.export-header {
+  padding: 12px 14px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #9ca3af;
+}
+
+.export-divider {
+  height: 1px;
+  background: #f3f4f6;
+  margin: 8px 12px;
+}
+
+.export-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 11px 14px;
+  border: none;
+  outline: none;
+  background: transparent;
+  border-radius: 10px;
+  cursor: pointer;
+  color: #111827;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.15s ease;
+  font-family: inherit;
+  text-align: left;
+}
+
+.export-option:hover {
+  background: #f3f4f6;
+}
+
+.export-option svg {
+  flex-shrink: 0;
+  color: #6b7280;
+}
+
+/* ─── Submenu ───────────────────────────────────────────── */
+
+.submenu-wrap {
+  position: relative;
+}
+
+.submenu {
+  position: absolute;
+  top: -8px;
+  right: calc(100% + 8px);
+  left: auto;
+  width: 220px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  padding: 8px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.12);
+  z-index: 9999999;
+}
+
+.submenu-arrow {
+  margin-left: auto;
+  opacity: 0.4;
+  font-size: 16px;
+}
+
+/* ─── States ────────────────────────────────────────────── */
+
+.error-box {
+  background: #fef2f2;
+  border: 1px solid #fee2e2;
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.empty-state {
+  padding: 80px 20px;
+  text-align: center;
+  color: #9ca3af;
+  font-size: 15px;
+}
+
+/* ─── Responsive ────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .queue-kv-label {
+    flex: 0 0 100%;
+    margin-bottom: 4px;
+  }
+
+  .queue-kv-value {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .queue-kv-confidence {
+    margin-left: auto;
+  }
+
+  .export-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .export-actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .export-actions > * {
+    flex: 1;
+    justify-content: center;
+  }
+
+  .export-menu {
+    right: 0;
+    left: 0;
+    width: calc(100vw - 32px);
+    position: fixed;
+    bottom: auto;
+    top: 50%;
+    transform: translateY(-50%);
+    max-height: 80vh;
+  }
+
+  .submenu {
+    position: fixed;
+    top: auto;
+    right: 16px;
+    left: 16px;
+    bottom: auto;
+    width: auto;
+    max-height: 60vh;
+    overflow-y: auto;
+  }
+}
+
+@media (max-width: 480px) {
+  .queue-header-title-wrap {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .queue-meta-bar {
+    gap: 8px;
+  }
+
+  .export-actions {
+    gap: 8px;
+  }
+
+  .save-review-btn,
+  .edit-toggle-btn,
+  .export-trigger {
+    padding: 10px 14px;
+    font-size: 13px;
+  }
 }
