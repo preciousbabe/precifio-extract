@@ -136,13 +136,87 @@ function AppContent() {
 
       <NetworkStatus status={network} />
 
-      <main className="app-main">
+            <main className="app-main">
+                {!user && (
+          <div className="guest-hero">
+            <div className="guest-hero-badge">🎉 1 Free Extraction — No Sign Up Required</div>
+            <h2 className="guest-headline">
+               Turn invoices, receipts, bank statements and 30+ document types into structured data in seconds.
+            </h2>
+            <p className="guest-subheadline">
+              Snap a photo with your phone or drag & drop — PDF, JPG, PNG, and more supported
+            </p>
+
+            <div className="format-badges">
+              <span className="fmt-badge"><span className="fmt-dot pdf"/>PDF</span>
+              <span className="fmt-badge"><span className="fmt-dot jpg"/>JPG</span>
+              <span className="fmt-badge"><span className="fmt-dot png"/>PNG</span>
+              <span className="fmt-badge"><span className="fmt-dot jpeg"/>JPEG</span>
+            </div>
+
+            <div className="steps-strip">
+              <div className="step">
+                <div className="step-icon">📸</div>
+                <div className="step-title">Snap or Drop</div>
+                <div className="step-desc">Phone camera or file</div>
+              </div>
+              <div className="step-arrow">→</div>
+              <div className="step">
+                <div className="step-icon">⚡</div>
+                <div className="step-title">AI Extracts</div>
+                <div className="step-desc">Structured in seconds</div>
+              </div>
+              <div className="step-arrow">→</div>
+              <div className="step">
+                <div className="step-icon">📥</div>
+                <div className="step-title">Export</div>
+                <div className="step-desc">JSON, Excel, PDF & more</div>
+              </div>
+            </div>
+
+            <div className="guest-features">
+              <span className="feature-item">✅ 10 free credits when you sign up</span>
+              <span className="feature-item">✅ No credit card required</span>
+              <span className="feature-item">✅ Export to Xero & QuickBooks</span>
+              <span className="feature-item">✅ Batch processing supported</span>
+              <span className="feature-item">✅ Zero data retention — export before closing or your data is lost permanently.</span>
+                        </div>
+
+            <button 
+              className="guest-signup-btn"
+              onClick={() => {
+                setShowAuthModal(true);
+                setAuthModalMode('signup');
+              }}
+            >
+              Sign Up Free — Get 10 Credits
+            </button>
+          </div>
+        )}
+
         <DocumentUploader
           onAddFiles={queue.addFiles}
           isProcessing={queue.processing}
         />
         <DocumentQueue queue={queue} />
       </main>
+
+
+            {/* FOOTER */}
+      <footer className="app-footer">
+        <div className="footer-inner">
+          <span className="footer-brand">Precifio Extract</span>
+          <div className="footer-links">
+            <a href="/terms" target="_blank" rel="noopener noreferrer">Terms</a>
+            <span className="footer-dot">·</span>
+            <a href="/privacy" target="_blank" rel="noopener noreferrer">Privacy</a>
+            <span className="footer-dot">·</span>
+            <a href="/support" target="_blank" rel="noopener noreferrer">Support</a>
+            
+          </div>
+          <span className="footer-copy">&copy; 2026</span>
+        </div>
+      </footer>
 
       <AuthModal />
 

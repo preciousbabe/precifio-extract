@@ -497,38 +497,34 @@ function ExportDropdown({ item, segments, onExport, user, disabled, config }) {
 
       switch (format) {
         case "json":
-          await downloadExport({ payload, format: "json", config  });
+          await downloadExport({ payload, format: "json", config });
           break;
         case "excel":
-          await downloadExport({ payload, format: "xlsx", config  });
+          await downloadExport({ payload, format: "xlsx", config });
           break;
         case "pdf":
-          await downloadExport({ payload, format: "pdf", config  });
+          await downloadExport({ payload, format: "pdf", config });
           break;
         case "docx":
-          await downloadExport({ payload, format: "docx", config  });
+          await downloadExport({ payload, format: "docx", config });
           break;
 
-        case "xero-pdf":
-        case "xero-docx":
-        case "xero-json":
-        case "xero-xlsx":
-        case "quickbooks-pdf":
-        case "quickbooks-docx":
-        case "quickbooks-json":
-        case "quickbooks-xlsx":
-        case "google-drive-pdf":
-        case "google-drive-docx":
-        case "google-drive-json":
-        case "google-drive-xlsx":
-        case "dropbox-pdf":
-        case "dropbox-docx":
-        case "dropbox-json":
-        case "dropbox-xlsx":
-        case "onedrive-pdf":
-        case "onedrive-docx":
-        case "onedrive-json":
-        case "onedrive-xlsx":
+        case "xero":
+        case "quickbooks":
+          if (!user) {
+            alert("Please sign in to use integrations.");
+            setExporting(null);
+            return;
+          }
+          await connectIntegration({
+            provider: format,
+            userId: user.id,
+            model: buildExportModel(payload),
+            exportFormat: DEFAULT_UPLOAD_FORMAT,
+            options: { config }
+          });
+          break;
+
         case "webhook":
         case "slack":
           if (!user) {
@@ -536,47 +532,13 @@ function ExportDropdown({ item, segments, onExport, user, disabled, config }) {
             setExporting(null);
             return;
           }
-
-          const oauthProviders = ["google-drive", "dropbox", "onedrive", "xero", "quickbooks"];
-
-          let cloudProvider = format;
-          let exportFormat = DEFAULT_UPLOAD_FORMAT;
-
-          for (const p of oauthProviders.sort((a, b) => b.length - a.length)) {
-            if (format === p) {
-              cloudProvider = p;
-              exportFormat = DEFAULT_UPLOAD_FORMAT;
-              break;
-            }
-            if (format.startsWith(p + "-")) {
-              cloudProvider = p;
-              exportFormat = format.slice(p.length + 1);
-              break;
-            }
-          }
-
-          if (!oauthProviders.includes(cloudProvider)) {
-            cloudProvider = format;
-            exportFormat = DEFAULT_UPLOAD_FORMAT;
-          }
-
-          if (oauthProviders.includes(cloudProvider)) {
-            await connectIntegration({
-              provider: cloudProvider,
-              userId: user.id,
-              model: buildExportModel(payload),
-              exportFormat,
-              options: { config }
-            });
-          } else {
-            await sendToIntegration({
-              provider: cloudProvider,
-              payload,
-              userId: user.id,
-              exportFormat,
-              options: { config }
-            });
-          }
+          await sendToIntegration({
+            provider: format,
+            payload,
+            userId: user.id,
+            exportFormat: DEFAULT_UPLOAD_FORMAT,
+            options: { config }
+          });
           break;
 
         case "email-pdf":
@@ -588,7 +550,7 @@ function ExportDropdown({ item, segments, onExport, user, disabled, config }) {
           await sendEmail(payload, mappedFmt, config);
           break;
         }
-        
+
         case "clipboard":
           await copyToClipboard(payload);
           setCopied(true);
@@ -611,13 +573,6 @@ function ExportDropdown({ item, segments, onExport, user, disabled, config }) {
     }
   };
 
-  const EXPORT_FORMATS = [
-    { key: "pdf", label: "PDF", icon: <IconPdf /> },
-    { key: "docx", label: "Word (.docx)", icon: <IconWord /> },
-    { key: "excel", label: "Excel (.xlsx)", icon: <IconExcel /> },
-    { key: "json", label: "JSON", icon: <IconCode /> },
-  ];
-
   return (
     <div className="export-wrap" ref={menuRef}>
       <button
@@ -628,9 +583,9 @@ function ExportDropdown({ item, segments, onExport, user, disabled, config }) {
       >
         <IconDownload />
         <span>
-          {exporting ? "Exporting…" 
-            : copied ? "Copied!" 
-            : disabled ? "Save to Export" 
+          {exporting ? "Exporting…"
+            : copied ? "Copied!"
+            : disabled ? "Save to Export"
             : "Export / Send"}
         </span>
         <span className="export-chevron" style={{ transform: open ? "rotate(180deg)" : "rotate(0deg)" }}>
@@ -666,97 +621,38 @@ function ExportDropdown({ item, segments, onExport, user, disabled, config }) {
           </button>
 
           <div className="export-divider" />
-          <div className="export-header">Cloud integrations</div>
-
-          <div
-            className="submenu-wrap"
-            onMouseEnter={() => setSubmenu("google-drive")}
-            onMouseLeave={() => setSubmenu(null)}
-          >
-            <button className="export-option">
-              <IconGoogleDrive /> Google Drive <span className="submenu-arrow">›</span>
-            </button>
-            {submenu === "google-drive" && (
-              <div className="submenu">
-                {EXPORT_FORMATS.map(f => (
-                  <button key={f.key} className="export-option" onClick={() => handleExport(`google-drive-${f.key}`)}>
-                    {f.icon} {f.label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div
-            className="submenu-wrap"
-            onMouseEnter={() => setSubmenu("dropbox")}
-            onMouseLeave={() => setSubmenu(null)}
-          >
-            <button className="export-option">
-              <IconDropbox /> Dropbox <span className="submenu-arrow">›</span>
-            </button>
-            {submenu === "dropbox" && (
-              <div className="submenu">
-                {EXPORT_FORMATS.map(f => (
-                  <button key={f.key} className="export-option" onClick={() => handleExport(`dropbox-${f.key}`)}>
-                    {f.icon} {f.label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div
-            className="submenu-wrap"
-            onMouseEnter={() => setSubmenu("onedrive")}
-            onMouseLeave={() => setSubmenu(null)}
-          >
-            <button className="export-option">
-              <IconOneDrive /> OneDrive <span className="submenu-arrow">›</span>
-            </button>
-            {submenu === "onedrive" && (
-              <div className="submenu">
-                {EXPORT_FORMATS.map(f => (
-                  <button key={f.key} className="export-option" onClick={() => handleExport(`onedrive-${f.key}`)}>
-                    {f.icon} {f.label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="export-divider" />
           <div className="export-header">Send to system</div>
 
           <button className="export-option" onClick={() => handleExport("webhook")}>
             <IconWebhook /> Webhook
           </button>
-          {/* REPLACE the old "Email" button in the export menu with this submenu block */}
-<div
-  className="submenu-wrap"
-  onMouseEnter={() => setSubmenu("email")}
-  onMouseLeave={() => setSubmenu(null)}
->
-  <button className="export-option">
-    <IconMail /> Email <span className="submenu-arrow">›</span>
-  </button>
-  {submenu === "email" && (
-    <div className="submenu">
-      <button className="export-option" onClick={() => handleExport("email-pdf")}>
-        <IconPdf /> Email as PDF
-      </button>
-      <button className="export-option" onClick={() => handleExport("email-excel")}>
-        <IconExcel /> Email as Excel
-      </button>
-      <button className="export-option" onClick={() => handleExport("email-docx")}>
-        <IconWord /> Email as Word
-      </button>
-      <button className="export-option" onClick={() => handleExport("email-json")}>
-        <IconCode /> Email as JSON
-      </button>
-    </div>
-  )}
-</div>
+
+          <div
+            className="submenu-wrap"
+            onMouseEnter={() => setSubmenu("email")}
+            onMouseLeave={() => setSubmenu(null)}
+          >
+            <button className="export-option">
+              <IconMail /> Email <span className="submenu-arrow">›</span>
+            </button>
+            {submenu === "email" && (
+              <div className="submenu">
+                <button className="export-option" onClick={() => handleExport("email-pdf")}>
+                  <IconPdf /> Email as PDF
+                </button>
+                <button className="export-option" onClick={() => handleExport("email-excel")}>
+                  <IconExcel /> Email as Excel
+                </button>
+                <button className="export-option" onClick={() => handleExport("email-docx")}>
+                  <IconWord /> Email as Word
+                </button>
+                <button className="export-option" onClick={() => handleExport("email-json")}>
+                  <IconCode /> Email as JSON
+                </button>
+              </div>
+            )}
+          </div>
+
           <button className="export-option" onClick={() => handleExport("slack")}>
             <IconSlack /> Slack / Teams
           </button>
@@ -773,7 +669,6 @@ function ExportDropdown({ item, segments, onExport, user, disabled, config }) {
     </div>
   );
 }
-
 
 // ─── Main Component ───────────────────────────────────────────────
 

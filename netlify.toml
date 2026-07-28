@@ -6,9 +6,38 @@
 [dev]
   command = "vite"
   targetPort = 5173
-  publish = "dist"
   functions = "netlify/functions"
+  # ❌ DON'T put publish = "dist" here — dist doesn't exist in dev
 
+# ── STATIC PAGES (BEFORE the SPA catch-all) ──
+[[redirects]]
+  from = "/terms"
+  to = "/terms.html"
+  status = 200
+
+[[redirects]]
+  from = "/privacy"
+  to = "/privacy.html"
+  status = 200
+
+[[redirects]]
+  from = "/support"
+  to = "/support.html"
+  status = 200
+
+# ── API FUNCTIONS ──
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+
+# ── SPA CATCH-ALL (MUST BE LAST) ──
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# ── CORS HEADERS ──
 [[headers]]
   for = "/*"
   [headers.values]
@@ -16,7 +45,4 @@
     Access-Control-Allow-Methods = "GET, POST, OPTIONS"
     Access-Control-Allow-Headers = "Content-Type, Authorization"
 
-[[redirects]]
-  from = "/api/*"
-  to = "/.netlify/functions/:splat"
-  status = 200
+    

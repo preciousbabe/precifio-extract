@@ -5,6 +5,7 @@ const auth = require("./integrations/auth");
 const responses = require("./integrations/responses");
 const logger = require("./integrations/logger");
 const exporter = require("./integrations/export");
+const engine = require("./integrations/engine");
 
 exports.handler = async (event) => {
 
@@ -275,57 +276,51 @@ console.log("PENDING UPLOAD");
 
 console.log(pending);
 
-if (pending) {
+        if (pending) {
+      const connection = await auth.getIntegrationConnection(
+        stateRecord.user_id,
+        provider
+      );
 
-  console.log("================================");
-  console.log("STARTING PENDING GOOGLE UPLOAD");
-  console.log("================================");
+      if (!connection) {
+        logger.warn("Pending action skipped: no connection found.", {
+          provider,
+          userId: stateRecord.user_id
+        });
+      } else if (registry.supportsUpload(provider)) {
+        const exported = await exporter.generateExport({
+          model: pending.model,
+          format: pending.exportFormat
+        });
 
-  const connection =
-    await auth.getIntegrationConnection(
-      stateRecord.user_id,
-      provider
-    );
+        const client = registry.getProviderClient(provider);
+        await client.upload({
+          connection,
+          exportFile: exported,
+          options: pending.options || {}
+        });
+      } else if (registry.supportsTransformation(provider)) {
+        const transformed = await engine.transform({
+          provider,
+          model: pending.model,
+          options: pending.options || {}
+        });
 
-  console.log("CONNECTION");
-  console.log({
-    exists: !!connection,
-    hasToken: !!connection?.access_token
-  });
+        const client = registry.getProviderClient(provider);
+        const sendOptions = {
+          payload: transformed,
+          accessToken: connection.access_token
+        };
 
-  const exported =
-    await exporter.generateExport({
+        if (provider === "xero") {
+          sendOptions.tenantId = connection.provider_account_id;
+        } else if (provider === "quickbooks") {
+          sendOptions.realmId = connection.provider_workspace_id;
+        }
 
-      model: pending.model,
-
-      format: pending.exportFormat
-
-    });
-
-  console.log("EXPORT CREATED");
-  console.log({
-    file: exported.fileName,
-    format: exported.extension
-  });
-
-  const client =
-    registry.getProviderClient(provider);
-
-  const uploadResult =
-    await client.upload({
-
-      connection,
-
-      exportFile: exported,
-
-      options: pending.options || {}
-
-    });
-
-  console.log("UPLOAD COMPLETE");
-  console.log(uploadResult);
-
-}
+        await client.send(sendOptions);
+      }
+    }
 
 return {
 

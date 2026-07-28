@@ -217,59 +217,50 @@ console.log({
      * --------------------------------------------------------
      */
 
-    if (registry.supportsTransformation(provider)) {
+           if (registry.supportsTransformation(provider)) {
 
       if (!model) {
-
-        return responses.badRequest(
-          "Export model is required."
-        );
-
+        return responses.badRequest("Export model is required.");
       }
 
-      logger.info(
-        "Transforming export model.",
-        {
-          provider
-        }
-      );
+      logger.info("Transforming export model.", { provider });
 
-      const transformed =
-        await engine.transform({
+      const transformed = await engine.transform({
+        provider,
+        model,
+        options
+      });
 
-          provider,
+      logger.info("Sending transformed data to provider.", { provider });
 
-          model,
+      const client = registry.getProviderClient(provider);
 
-          options
+      const sendOptions = {
+        payload: transformed,
+        accessToken: connection.access_token,
+        timeout: options.timeout,
+        retries: options.retries
+      };
 
-        });
+      if (provider === "xero") {
+        sendOptions.tenantId = connection.provider_account_id;
+      } else if (provider === "quickbooks") {
+        sendOptions.realmId = connection.provider_workspace_id;
+      }
 
-    const result =
-  await client.upload({
+      if (options && typeof options === "object") {
+        Object.assign(sendOptions, options);
+      }
 
-    connection,
+      const result = await client.send(sendOptions);
 
-    exportFile: exported,
-
-    options
-
-  });
-  
-return responses.success({
-
-  exported: true,
-
-  provider,
-
-  format: exported.extension,
-
-  result
-
-});
-
+      return responses.success({
+        exported: true,
+        provider,
+        result
+      });
     }
-
+    
     /*
      * --------------------------------------------------------
      * Upload Providers

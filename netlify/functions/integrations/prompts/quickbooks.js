@@ -50,7 +50,7 @@ ${JSON.stringify(options || {}, null, 2)}
 
 Expected output schema:
 
-${schema ? JSON.stringify(schema, null, 2) : "No schema provided. Return the most appropriate QuickBooks compatible JSON structure based only on available extracted information."}
+${schema ? JSON.stringify(schema, null, 2) : JSON.stringify({ Line: [], CustomerRef: {} }, null, 2)}
 `,
 
     user: `

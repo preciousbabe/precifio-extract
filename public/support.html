@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Support — Precifio Extract</title>
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --text: #0f172a;
+      --muted: #475569;
+      --accent: #2563eb;
+      --accent-light: #eff6ff;
+      --border: #e2e8f0;
+      --radius: 12px;
+      --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+      padding: 40px 20px;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+    .brand-logo {
+      width: 32px;
+      height: 32px;
+      background: var(--accent);
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      color: #fff;
+      font-weight: 700;
+      font-size: 14px;
+    }
+    .brand-name {
+      font-weight: 700;
+      font-size: 1.1rem;
+      color: var(--text);
+    }
+    h1 {
+      font-size: 1.75rem;
+      margin: 24px 0 8px;
+      letter-spacing: -0.02em;
+    }
+    .subtitle {
+      color: var(--muted);
+      margin-bottom: 32px;
+    }
+
+    /* Contact Cards */
+    .contact-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin-bottom: 40px;
+    }
+    .contact-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      text-align: center;
+      transition: box-shadow 0.2s, transform 0.2s;
+    }
+    .contact-card:hover {
+      box-shadow: var(--shadow);
+      transform: translateY(-2px);
+    }
+    .contact-icon {
+      width: 48px;
+      height: 48px;
+      background: var(--accent-light);
+      border-radius: 12px;
+      display: grid;
+      place-items: center;
+      margin: 0 auto 12px;
+      font-size: 1.4rem;
+    }
+    .contact-card h3 {
+      font-size: 1rem;
+      margin-bottom: 6px;
+    }
+    .contact-card p {
+      font-size: 0.9rem;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+    .contact-card a {
+      color: var(--accent);
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.9rem;
+    }
+    .contact-card a:hover {
+      text-decoration: underline;
+    }
+
+    /* FAQ */
+    .faq-section {
+      background: var(--card);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 32px;
+      margin-bottom: 24px;
+    }
+    .faq-section h2 {
+      font-size: 1.2rem;
+      margin-bottom: 20px;
+    }
+    .faq-item {
+      border-bottom: 1px solid var(--border);
+      padding: 16px 0;
+    }
+    .faq-item:last-child {
+      border-bottom: none;
+    }
+    .faq-question {
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 8px;
+      cursor: pointer;
+    }
+    .faq-answer {
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    /* Status */
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #dcfce7;
+      color: #166534;
+      padding: 6px 14px;
+      border-radius: 999px;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      background: #22c55e;
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .footer {
+      margin-top: 40px;
+      text-align: center;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+
+    @media (max-width: 600px) {
+      .faq-section { padding: 20px; }
+      h1 { font-size: 1.4rem; }
+    }
+  </style>
+<base target="_blank">
+</head>
+<body>
+  <div class="container">
+    <div class="brand">
+      <div class="brand-logo">Px</div>
+      <div class="brand-name">Precifio Extract</div>
+    </div>
+
+    <h1>Support Center</h1>
+    <p class="subtitle">We're here to help. Reach out anytime — we typically respond within 24 hours.</p>
+
+    <div class="contact-grid">
+      <div class="contact-card">
+        <div class="contact-icon">✉️</div>
+        <h3>Email Us</h3>
+        <p>For general questions, billing, or technical issues</p>
+        <a href="mailto:support@precifio.app">support@precifio.app</a>
+      </div>
+      <div class="contact-card">
+        <div class="contact-icon">🐦</div>
+        <h3>Twitter / X</h3>
+        <p>Quick questions and public updates</p>
+        <a href="https://twitter.com/precifio" target="_blank" rel="noopener noreferrer">@precifio</a>
+      </div>
+      <div class="contact-card">
+        <div class="contact-icon">💬</div>
+        <h3>Live Chat</h3>
+        <p>Available for logged-in users during business hours</p>
+        <span style="color: var(--muted); font-size: 0.9rem; font-weight: 600;">In-app only</span>
+      </div>
+    </div>
+
+    <div class="faq-section">
+      <h2>Frequently Asked Questions</h2>
+
+      <div class="faq-item">
+        <div class="faq-question">How do credits work?</div>
+        <div class="faq-answer">Each document extraction costs 1 credit. Guest users get 1 free extraction. Signed-up users receive 10 complimentary credits. Additional credits can be purchased in-app at any time.</div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-question">What document formats are supported?</div>
+        <div class="faq-answer">We support PDF, JPG, PNG, and JPEG. More formats are coming soon. For best results, ensure your documents are clear and well-lit.</div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-question">Is my data kept after extraction?</div>
+        <div class="faq-answer">No. We operate a strict zero data-retention policy. Your documents and extracted data are held only for the duration of your active session and are permanently deleted once you export or close the app.</div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-question">Can I export to Xero or QuickBooks?</div>
+        <div class="faq-answer">Yes. Connect your Xero or QuickBooks account from the export settings panel, and extracted data can be pushed directly to your connected accounting platform.</div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-question">I didn't receive my credits after purchase. What should I do?</div>
+        <div class="faq-answer">First, refresh the page. If credits still don't appear, check your email for a receipt and contact us at <a href="mailto:support@precifio.app">support@precifio.app</a> with your transaction ID.</div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-question">How do I delete my account?</div>
+        <div class="faq-answer">Send a request to <a href="mailto:support@precifio.app">support@precifio.app</a> from your registered email address. We'll process the deletion within 48 hours and confirm once complete.</div>
+      </div>
+    </div>
+
+    <div class="faq-section" style="text-align: center;">
+      <span class="status-badge"><span class="status-dot"></span> All systems operational</span>
+      <p style="margin-top: 12px; color: var(--muted); font-size: 0.9rem;">Last checked: just now</p>
+    </div>
+
+    <div class="footer">
+      &copy; 2026 Precifio Extract. <a href="/">Back to app</a> &middot; <a href="/terms">Terms</a> &middot; <a href="/privacy">Privacy</a>
+    </div>
+  </div>
+</body>
+</html>
