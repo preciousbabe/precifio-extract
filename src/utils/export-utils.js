@@ -2,508 +2,218 @@
 
 const INTEGRATION_API = "/.netlify/functions";
 
-// const DEFAULT_EMAIL_FORMAT = "pdf";
-
-/**
- * Download a blob as a file.
- */
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
-
   const a = document.createElement("a");
-
   a.href = url;
   a.download = filename;
-
   document.body.appendChild(a);
-
   a.click();
-
   document.body.removeChild(a);
-
   URL.revokeObjectURL(url);
 }
 
-/**
- * Remove confidence values from exported data.
- */
 function stripConfidence(segments = []) {
   return segments.map(segment => ({
     ...segment,
-
     fields: (segment.fields || []).map(field => {
-
       const { confidence, ...cleanField } = field;
-
       if (
         cleanField.value &&
         typeof cleanField.value === "object" &&
         !Array.isArray(cleanField.value)
       ) {
-
-        const {
-          confidence: nestedConfidence,
-          ...cleanValue
-        } = cleanField.value;
-
-        return {
-          ...cleanField,
-          value: cleanValue
-        };
-
+        const { confidence: nestedConfidence, ...cleanValue } = cleanField.value;
+        return { ...cleanField, value: cleanValue };
       }
-
       return cleanField;
-
     })
   }));
 }
 
-/**
- * Determines if a segment represents a table.
- */
 function isTableSegment(segment) {
-
   if (!segment) return false;
-
-  if (
-    segment.segment_type === "table"
-  ) {
-    return true;
-  }
-
+  if (segment.segment_type === "table") return true;
   const fields = segment.fields || [];
-
-  if (fields.length < 2) {
-    return false;
-  }
+  if (fields.length < 2) return false;
 
   const first = fields[0]?.value;
+  if (!first || typeof first !== "object" || Array.isArray(first)) return false;
 
-  if (
-    !first ||
-    typeof first !== "object" ||
-    Array.isArray(first)
-  ) {
-    return false;
-  }
-
-  const keys = Object.keys(first);
+  const keys = JSON.stringify(Object.keys(first).sort());
 
   return fields.every(field => {
-
-    const value = field.value;
-
+    const value = field?.value;
     return (
       value &&
       typeof value === "object" &&
       !Array.isArray(value) &&
-      JSON.stringify(Object.keys(value)) === JSON.stringify(keys)
+      JSON.stringify(Object.keys(value).sort()) === keys
     );
-
   });
-
 }
 
-/**
- * Build clean export payload.
- */
 export function buildExportModel(payload) {
-
-  const segments = stripConfidence(
-    payload.segments || []
-  );
-
+  const segments = stripConfidence(payload.segments || []);
   const tables = [];
   const details = [];
 
   for (const segment of segments) {
-
-    if (isTableSegment(segment)) {
-
-      tables.push(segment);
-
-    } else {
-
-      details.push(segment);
-
-    }
-
+    if (isTableSegment(segment)) tables.push(segment);
+    else details.push(segment);
   }
 
   return {
-
     fileName: payload.fileName,
-
-    documentSummary:
-      payload.documentSummary,
-
-    extractedAt:
-      new Date().toISOString(),
-
+    documentSummary: payload.documentSummary,
+    extractedAt: new Date().toISOString(),
     segments,
-
     tables,
-
     details
-
   };
-
 }
 
 /**
- * Download an export from the backend export engine.
+ * @param {Object} options
+ * @param {Object} options.payload - raw extraction payload
+ * @param {string} options.format - json | excel | pdf | docx
+ * @param {Object} [options.config] - user/export configuration
+ * @param {boolean} [options.returnBuffer] - return buffer instead of downloading
  */
-export async function downloadExport({
-
-  payload,
-
-  format
-
-}) {
-
-  const model =
-    buildExportModel(payload);
+export async function downloadExport({ payload, format, config = {}, returnBuffer = false }) {
+  const model = buildExportModel(payload);
 
   const response = await fetch(
-
     `${INTEGRATION_API}/generate-export`,
-
     {
-
       method: "POST",
-
-      headers: {
-
-        "Content-Type": "application/json"
-
-      },
-
-      body: JSON.stringify({
-
-        model,
-
-        format
-
-      })
-
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model, format, config }) // <-- config added
     }
-
   );
 
   if (!response.ok) {
-
     let error = {};
-
-    try {
-
-      error = await response.json();
-
-    } catch {}
-
-    throw new Error(
-
-      error.error ||
-
-      "Failed to generate export."
-
-    );
-
+    try { error = await response.json(); } catch {}
+    throw new Error(error.error || "Failed to generate export.");
   }
 
-  const blob =
-    await response.blob();
+  const blob = await response.blob();
 
-  const disposition =
-    response.headers.get(
-      "Content-Disposition"
-    );
+   if (returnBuffer) {
+    const arrayBuffer = await blob.arrayBuffer();
+    return {
+      buffer: new Uint8Array(arrayBuffer), 
+      mimeType: blob.type,
+      filename: `${(model.fileName || "document").replace(/\.[^/.]+$/, "")}.${format === "excel" ? "xlsx" : format}`
+    };
+  }
 
-  const baseName = (
-    model.fileName || "document"
-  ).replace(/\.[^/.]+$/, "");
 
-  let filename =
-    `${baseName}.${format}`;
+  const disposition = response.headers.get("Content-Disposition");
+  const baseName = (model.fileName || "document").replace(/\.[^/.]+$/, "");
+  let filename = `${baseName}.${format === "excel" ? "xlsx" : format}`;
 
   if (disposition) {
-
-    const match =
-      disposition.match(
-        /filename="?(.+?)"?$/
-      );
-
-    if (match) {
-
-      filename = match[1];
-
-    }
-
+    const match = disposition.match(/filename="?(.+?)"?$/);
+    if (match) filename = match[1];
   }
 
   downloadBlob(blob, filename);
-
-  return {
-
-    success: true,
-
-    filename
-
-  };
-
+  return { success: true, filename };
 }
 
-/**
- * Resolve user-configurable integration URLs.
- */
-function resolveIntegrationUrl({
-  envValue,
-  storageKey,
-  promptMessage
-}) {
 
-  let url =
-    envValue ||
-    localStorage.getItem(storageKey);
-
-  if (!url) {
-
-    const entered =
-      prompt(promptMessage);
-
-    if (!entered) {
-      return null;
-    }
-
-    url = entered.trim();
-
-    if (!/^https?:\/\//i.test(url)) {
-
-      alert(
-        "Invalid URL. URL must begin with http:// or https://"
-      );
-
-      return null;
-
-    }
-
-    localStorage.setItem(
-      storageKey,
-      url
-    );
-
-  }
-
-  return url;
-
-}
 
 /**
  * Launch OAuth authorization flow.
  */
 export async function connectIntegration({
-
   provider,
-
   userId,
-
   model,
-
   exportFormat,
-
   options = {}
-
 }) {
+  if (!provider) throw new Error("Provider is required.");
+  if (!userId) throw new Error("User ID is required.");
 
-  console.log("================================");
-  console.log("CONNECT INTEGRATION CALLED");
-  console.log("================================");
-  console.log({ provider, userId });
-
-  console.log("PENDING EXPORT");
-
-console.log({
-    provider,
-    exportFormat,
-    hasModel: !!model,
-    options
-});
-
-
-  const response = await fetch(
-
-    `${INTEGRATION_API}/connect-provider`,
-
-    {
-
-      method: "POST",
-
-      headers: {
-
-        "Content-Type": "application/json"
-
-      },
-
-      body: JSON.stringify({
-
-  provider,
-
-  userId,
-
-  model,
-
-  exportFormat,
-
-  options
-
-})
-
-    }
-
-  );
-
-  console.log("CONNECT STATUS");
-  console.log(response.status);
+  const response = await fetch(`${INTEGRATION_API}/connect-provider`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ provider, userId, model, exportFormat, options }),
+  });
 
   let result = {};
-
   try {
-
     result = await response.json();
-
-  } catch (err) {
-
-    console.error("FAILED TO PARSE JSON RESPONSE");
-    console.error(err);
-
+  } catch {
+    // response body is not JSON; leave result empty
   }
-
-  console.log("================================");
-  console.log("CONNECT RESULT");
-  console.log("================================");
-  console.log(result);
 
   if (!response.ok) {
-
-    throw new Error(
-
-      result?.error ||
-
-      result?.message ||
-
-      "Failed to initialize OAuth."
-
-    );
-
+    throw new Error(result?.error || result?.message || "Failed to initialize OAuth.");
   }
 
-  console.log("RESULT.DATA");
-  console.log(result?.data);
-
-  console.log("RESULT.AUTHORIZEURL");
-  console.log(result?.authorizeUrl);
-
-  const authorizeUrl =
-
-    result?.data?.authorizeUrl ||
-
-    result?.authorizeUrl ||
-
-    null;
-
-  console.log("FINAL AUTHORIZE URL");
-  console.log(authorizeUrl);
-
+  const authorizeUrl = result?.data?.authorizeUrl || result?.authorizeUrl;
   if (!authorizeUrl) {
-
-    throw new Error(
-
-      "Authorization URL missing."
-
-    );
-
+    throw new Error("Authorization URL missing.");
   }
-
-  console.log("REDIRECTING TO GOOGLE...");
 
   window.location.href = authorizeUrl;
-
 }
+
+
+function resolveIntegrationUrl({ envValue, storageKey, promptMessage }) {
+  const stored = localStorage.getItem(storageKey);
+  if (stored) return stored;
+  const input = window.prompt(promptMessage);
+  if (!input || !input.trim()) return null;
+  const trimmed = input.trim();
+  try { new URL(trimmed); } catch {
+    alert("Please enter a valid URL (including https://).");
+    return null;
+  }
+  localStorage.setItem(storageKey, trimmed);
+  return trimmed;
+}
+
 
 /**
  * Send export to an integration.
+ * CHANGED: pulls `config` out of `options` and forwards it.
  */
 export async function sendToIntegration({
-
   provider,
-
   payload,
-
   userId,
-
   exportFormat = "pdf",
-
   options = {}
-
 }) {
-
   if (!provider) {
-
-    throw new Error(
-
-      "Integration provider is required."
-
-    );
-
+    throw new Error("Integration provider is required.");
   }
 
-  const model =
-    buildExportModel(payload);
+  const model = buildExportModel(payload);
+  const config = options.config || {};
 
   let url = null;
 
   switch (provider) {
-
-    case "slack":
-
-      url = resolveIntegrationUrl({
-
-        envValue:
-          process.env.REACT_APP_SLACK_WEBHOOK_URL,
-
-        storageKey:
-          "precifio_slack_webhook_url",
-
-        promptMessage:
-          "Enter your Slack Incoming Webhook URL:"
-
+          case "slack":
+        url = resolveIntegrationUrl({
+        storageKey: "precifio_slack_webhook_url",
+        promptMessage: "Enter your Slack Incoming Webhook URL:"
       });
-
-      if (!url) {
-        return;
-      }
-
+      if (!url) throw new Error("Slack webhook URL is required.");
       break;
 
-    case "webhook":
-
-      url = resolveIntegrationUrl({
-
-        envValue:
-          process.env.REACT_APP_WEBHOOK_URL,
-
-        storageKey:
-          "precifio_webhook_url",
-
-        promptMessage:
-          "Enter your Webhook URL:"
-
+          case "webhook":
+        url = resolveIntegrationUrl({
+        storageKey: "precifio_webhook_url",
+        promptMessage: "Enter your Webhook URL:"
       });
-
-      if (!url) {
-        return;
-      }
-
+      if (!url) throw new Error("Webhook URL is required.");
       break;
 
     case "google-drive":
@@ -511,232 +221,104 @@ export async function sendToIntegration({
     case "onedrive":
     case "xero":
     case "quickbooks":
-
       // OAuth is handled by ExportDropdown.
       // We simply continue to send-integration.
-
       break;
 
     default:
-
       break;
-
   }
 
   const body = {
-
     provider,
-
     userId,
-
     model,
-
     exportFormat,
-
-    options
-
+    options: { ...options, config } // <-- config preserved
   };
 
   if (url) {
-
     body.url = url;
-
   }
 
   const response = await fetch(
-
     `${INTEGRATION_API}/send-integration`,
-
     {
-
       method: "POST",
-
-      headers: {
-
-        "Content-Type": "application/json"
-
-      },
-
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body)
-
     }
-
   );
 
   let result = {};
-
-  try {
-
-    result = await response.json();
-
-  } catch {
-
-    result = {};
-
+  try { result = await response.json(); } catch {}
+    if (!response.ok) {
+    throw new Error(result.error || `${provider} integration failed.`);
   }
 
-  if (!response.ok) {
-
-    throw new Error(
-
-      result.error ||
-
-      `${provider} integration failed.`
-
-    );
-
-  }
+  alert(
+    provider === "slack"
+      ? "Slack message sent successfully."
+      : "Webhook delivered successfully."
+  );
 
   return result;
-
 }
-
-
-// ─── Email ────────────────────────────────────────────────────────
 
 const DEFAULT_EMAIL_FORMAT = "pdf";
 
 export async function sendEmail(
-
   payload,
-
-  exportFormat = DEFAULT_EMAIL_FORMAT
-
+  exportFormat = DEFAULT_EMAIL_FORMAT,
+  config = {}
 ) {
-
-  const email = prompt(
-    "Enter recipient email address:"
-  );
-
-  if (!email) {
-    return;
-  }
+  const email = prompt("Enter recipient email address:");
+  if (!email) return;
 
   const to = email.trim();
-
-  if (
-    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)
-  ) {
-
-    alert(
-      "Please enter a valid email address."
-    );
-
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
+    alert("Please enter a valid email address.");
     return;
-
   }
 
-  const model =
-    buildExportModel(payload);
-
-  const subject =
-    `Document Extraction: ${model.fileName}`;
+  const model = buildExportModel(payload);
+  const subject = `Document Extraction: ${model.fileName}`;
 
   const response = await fetch(
-
     `${INTEGRATION_API}/send-email`,
-
     {
-
       method: "POST",
-
-      headers: {
-
-        "Content-Type":
-          "application/json"
-
-      },
-
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-
         to,
-
         subject,
-
         model,
-
-        exportFormat
-
+        exportFormat,
+        config // <-- config added
       })
-
     }
-
   );
 
   let result = {};
-
-  try {
-
-    result =
-      await response.json();
-
-  } catch {
-
-    result = {};
-
-  }
-
+  try { result = await response.json(); } catch {}
   if (!response.ok) {
-
-    throw new Error(
-
-      result.error ||
-
-      "Unable to send email."
-
-    );
-
+    throw new Error(result.error || "Unable to send email.");
   }
 
-  alert(
-    `Email sent successfully as ${exportFormat.toUpperCase()}.`
-  );
-
+  alert(`Email sent successfully as ${exportFormat.toUpperCase()}.`);
   return result;
-
 }
 
-// ─── Clipboard ────────────────────────────────────────────────────
-
 export async function copyToClipboard(payload) {
-
-  const text = JSON.stringify(
-
-    buildExportModel(payload),
-
-    null,
-
-    2
-
-  );
-
+  const text = JSON.stringify(buildExportModel(payload), null, 2);
   try {
-
-    await navigator.clipboard.writeText(
-      text
-    );
-
+    await navigator.clipboard.writeText(text);
   } catch {
-
-    const textarea =
-      document.createElement(
-        "textarea"
-      );
-
+    const textarea = document.createElement("textarea");
     textarea.value = text;
-
-    document.body.appendChild(
-      textarea
-    );
-
+    document.body.appendChild(textarea);
     textarea.select();
-
     document.execCommand("copy");
-
-    document.body.removeChild(
-      textarea
-    );
-
+    document.body.removeChild(textarea);
   }
-
 }

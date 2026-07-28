@@ -105,16 +105,11 @@ console.log(state);
       oauth.buildAuthorizationUrl({
 
         clientId:
-          process.env[
-            `${provider.toUpperCase().replace("-", "_")}_CLIENT_ID`
-          ],
+         process.env[integration.env.clientId],
 
 
         redirectUri:
-          process.env[
-            `${provider.toUpperCase().replace("-", "_")}_REDIRECT_URI`
-          ],
-
+         process.env[integration.env.redirectUri],
 
         state:
           state.value,

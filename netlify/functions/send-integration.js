@@ -370,64 +370,33 @@ return responses.success({
      * Webhook
      * --------------------------------------------------------
      */
-
     if (registry.supportsSend(provider)) {
 
       if (!model) {
-
-        return responses.badRequest(
-          "Export model is required."
-        );
-
+        return responses.badRequest("Export model is required.");
       }
 
-      const client =
-        registry.getProviderClient(provider);
+      const client = registry.getProviderClient(provider);
 
-      const sendOptions = {
+      const sendOptions = { url };
 
-        payload: model,
-
-        options
-
-      };
-
-      /*
-       * Slack & generic webhooks also require
-       * the destination URL supplied by the frontend.
-       */
-
-      if (url) {
-        sendOptions.url = url;
+      if (provider === "slack") {
+        sendOptions.text = `*Document Extraction: ${model.fileName || "Document"}*\n\`\`\`json\n${JSON.stringify(model, null, 2)}\n\`\`\``;
+      } else {
+        sendOptions.payload = model;
       }
 
-      /*
-       * OAuth-backed send providers
-       * (future-proof)
-       */
-
-      if (connection) {
-
-        sendOptions.connection = connection;
-
-        sendOptions.accessToken =
-          connection.access_token;
-
+      if (options && typeof options === "object") {
+        Object.assign(sendOptions, options);
       }
 
-      const result =
-        await client.send(sendOptions);
+      const result = await client.send(sendOptions);
 
       return responses.success({
-
         exported: true,
-
         provider,
-
         result
-
       });
-
     }
 
     /*

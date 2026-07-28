@@ -32,6 +32,7 @@ export default function DocumentQueue({ queue }) {
 
       <QueueToolbar
         stats={queue.stats}
+        items={queue.items}
         isProcessing={queue.processing}
         isPaused={queue.paused}
         hasSelection={queue.selectedIds.size > 0}

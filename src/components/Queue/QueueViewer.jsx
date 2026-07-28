@@ -1,6 +1,6 @@
 // src/components/Queue/QueueViewer.jsx
 // Full-screen overlay panel — renders via portal to document.body
-
+import { getExportSettings } from "../../components/ExportSettings";
 import React, { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useAuth } from "../../hooks/useAuth";
@@ -288,9 +288,20 @@ function KVRow({
       </div>
       <div className="queue-kv-value">
         {isEditing ? (
-          <input
+                    <input
             className="queue-edit-input"
-            value={value ?? ""}
+            value={
+              typeof value === "object" && value !== null
+                ? Object.entries(value)
+                    .map(([k, v]) => {
+                      const displayV = typeof v === "object" && v !== null
+                        ? JSON.stringify(v)
+                        : String(v);
+                      return `${formatLabel(k)}: ${displayV}`;
+                    })
+                    .join(", ")
+                : (value ?? "")
+            }
             onChange={(e) => onChange?.(e.target.value)}
           />
         ) : (
@@ -439,30 +450,22 @@ function renderValue(value) {
     );
   }
 
-  if (typeof value === "object") {
+   if (typeof value === "object") {
     const keys = Object.keys(value);
     if (keys.length === 1 && keys[0] === "value") {
       return renderValue(value.value);
     }
 
-    return (
-      <table className="nested-table">
-        <tbody>
-          {Object.entries(value).map(([k, v]) => (
-            <tr key={k}>
-              <th className="nested-th">{formatLabel(k)}</th>
-              <td className="nested-td">{renderValue(v)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    );
+    // Flatten to readable string — aligns with export format exactly
+    return Object.entries(value)
+      .map(([k, v]) => `${formatLabel(k)}: ${renderValue(v)}`)
+      .join(" | ");
   }
-
+  
   return String(value);
 }
 
-function ExportDropdown({ item, segments, onExport, user, disabled }) {
+function ExportDropdown({ item, segments, onExport, user, disabled, config }) {
   const [open, setOpen] = useState(false);
   const [submenu, setSubmenu] = useState(null);
   const [copied, setCopied] = useState(false);
@@ -494,45 +497,37 @@ function ExportDropdown({ item, segments, onExport, user, disabled }) {
 
       switch (format) {
         case "json":
-          await downloadExport({ payload, format: "json" });
-          break;
-        case "csv":
-          await downloadExport({ payload, format: "csv" });
+          await downloadExport({ payload, format: "json", config  });
           break;
         case "excel":
-          await downloadExport({ payload, format: "xlsx" });
+          await downloadExport({ payload, format: "xlsx", config  });
           break;
         case "pdf":
-          await downloadExport({ payload, format: "pdf" });
+          await downloadExport({ payload, format: "pdf", config  });
           break;
         case "docx":
-          await downloadExport({ payload, format: "docx" });
+          await downloadExport({ payload, format: "docx", config  });
           break;
 
         case "xero-pdf":
         case "xero-docx":
         case "xero-json":
-        case "xero-csv":
         case "xero-xlsx":
         case "quickbooks-pdf":
         case "quickbooks-docx":
         case "quickbooks-json":
-        case "quickbooks-csv":
         case "quickbooks-xlsx":
         case "google-drive-pdf":
         case "google-drive-docx":
         case "google-drive-json":
-        case "google-drive-csv":
         case "google-drive-xlsx":
         case "dropbox-pdf":
         case "dropbox-docx":
         case "dropbox-json":
-        case "dropbox-csv":
         case "dropbox-xlsx":
         case "onedrive-pdf":
         case "onedrive-docx":
         case "onedrive-json":
-        case "onedrive-csv":
         case "onedrive-xlsx":
         case "webhook":
         case "slack":
@@ -571,22 +566,29 @@ function ExportDropdown({ item, segments, onExport, user, disabled }) {
               userId: user.id,
               model: buildExportModel(payload),
               exportFormat,
-              options: {}
+              options: { config }
             });
           } else {
             await sendToIntegration({
               provider: cloudProvider,
               payload,
               userId: user.id,
-              exportFormat
+              exportFormat,
+              options: { config }
             });
           }
           break;
 
-        case "email":
-          await sendEmail(payload);
+        case "email-pdf":
+        case "email-excel":
+        case "email-docx":
+        case "email-json": {
+          const emailFmt = format.replace("email-", "");
+          const mappedFmt = emailFmt === "excel" ? "xlsx" : emailFmt;
+          await sendEmail(payload, mappedFmt, config);
           break;
-
+        }
+        
         case "clipboard":
           await copyToClipboard(payload);
           setCopied(true);
@@ -613,7 +615,6 @@ function ExportDropdown({ item, segments, onExport, user, disabled }) {
     { key: "pdf", label: "PDF", icon: <IconPdf /> },
     { key: "docx", label: "Word (.docx)", icon: <IconWord /> },
     { key: "excel", label: "Excel (.xlsx)", icon: <IconExcel /> },
-    { key: "csv", label: "CSV", icon: <IconTable /> },
     { key: "json", label: "JSON", icon: <IconCode /> },
   ];
 
@@ -643,9 +644,6 @@ function ExportDropdown({ item, segments, onExport, user, disabled }) {
 
           <button className="export-option" onClick={() => handleExport("json")}>
             <IconCode /> JSON (structured data)
-          </button>
-          <button className="export-option" onClick={() => handleExport("csv")}>
-            <IconTable /> CSV (spreadsheet)
           </button>
           <button className="export-option" onClick={() => handleExport("excel")}>
             <IconExcel /> Excel (.xlsx)
@@ -733,9 +731,32 @@ function ExportDropdown({ item, segments, onExport, user, disabled }) {
           <button className="export-option" onClick={() => handleExport("webhook")}>
             <IconWebhook /> Webhook
           </button>
-          <button className="export-option" onClick={() => handleExport("email")}>
-            <IconMail /> Email
-          </button>
+          {/* REPLACE the old "Email" button in the export menu with this submenu block */}
+<div
+  className="submenu-wrap"
+  onMouseEnter={() => setSubmenu("email")}
+  onMouseLeave={() => setSubmenu(null)}
+>
+  <button className="export-option">
+    <IconMail /> Email <span className="submenu-arrow">›</span>
+  </button>
+  {submenu === "email" && (
+    <div className="submenu">
+      <button className="export-option" onClick={() => handleExport("email-pdf")}>
+        <IconPdf /> Email as PDF
+      </button>
+      <button className="export-option" onClick={() => handleExport("email-excel")}>
+        <IconExcel /> Email as Excel
+      </button>
+      <button className="export-option" onClick={() => handleExport("email-docx")}>
+        <IconWord /> Email as Word
+      </button>
+      <button className="export-option" onClick={() => handleExport("email-json")}>
+        <IconCode /> Email as JSON
+      </button>
+    </div>
+  )}
+</div>
           <button className="export-option" onClick={() => handleExport("slack")}>
             <IconSlack /> Slack / Teams
           </button>
@@ -756,11 +777,26 @@ function ExportDropdown({ item, segments, onExport, user, disabled }) {
 
 // ─── Main Component ───────────────────────────────────────────────
 
-export default function QueueViewer({ item, onClose, onExport }) {
+export default function QueueViewer({ item, onClose, onExport, exportConfig = {} }) {
   const { user } = useAuth();
   const extraction = item?.result ?? {};
+  const savedSettings = getExportSettings();
+  const config = React.useMemo(() => {
+    const orgName = user?.organization?.name || "";
+    return {
+      branding: {
+        companyName: orgName || exportConfig?.branding?.companyName || savedSettings.branding.companyName || "",
+        showMetadata: exportConfig?.branding?.showMetadata ?? savedSettings.branding.showMetadata,
+        primaryColor: exportConfig?.branding?.primaryColor || savedSettings.branding.primaryColor || "1A365D"
+      },
+      includePageNumbers: exportConfig?.includePageNumbers ?? savedSettings.includePageNumbers,
+      includeConfidence: exportConfig?.includeConfidence ?? savedSettings.includeConfidence
+    };
+  }, [exportConfig, user]);
+
   const [isEditing, setIsEditing] = useState(false);
   const [showOriginal, setShowOriginal] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const metadata = extraction.metadata ?? {};
   const [segments, setSegments] = useState(() => {
     return JSON.parse(JSON.stringify(extraction.segments ?? []));
@@ -801,7 +837,7 @@ export default function QueueViewer({ item, onClose, onExport }) {
       alert("Please sign in to save corrections.");
       return;
     }
-
+      setIsSaving(true);
     try {
       const token = localStorage.getItem('precifio_token');
       if (!token) {
@@ -839,6 +875,8 @@ export default function QueueViewer({ item, onClose, onExport }) {
     } catch (err) {
       console.error(err);
       alert(err.message || "Unable to save changes.");
+    } finally {
+      setIsSaving(false);
     }
   }
 
@@ -980,9 +1018,13 @@ export default function QueueViewer({ item, onClose, onExport }) {
           </div>
 
           <div className="export-actions">
-            {hasChanges && (
-              <button className="save-review-btn" onClick={handleSaveChanges}>
-                Save Changes
+                        {hasChanges && (
+              <button 
+                className="save-review-btn" 
+                onClick={handleSaveChanges}
+                disabled={isSaving}
+              >
+                {isSaving ? "Saving…" : "Save Changes"}
               </button>
             )}
 
@@ -1008,6 +1050,7 @@ export default function QueueViewer({ item, onClose, onExport }) {
               onExport={onExport}
               user={user}
               disabled={isEditing}
+              config={config}
             />
           </div>
         </div>

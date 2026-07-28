@@ -5,6 +5,45 @@
 import { useEffect, useRef } from "react";
 import queueManager from "../services/queueManager";
 
+
+function createProgressSimulator(itemId, updateItem, itemsRef) {
+  let interval = null;
+  let timeout = null;
+
+  const start = () => {
+    updateItem(itemId, { status: "uploading", progress: 5 });
+
+    timeout = setTimeout(() => {
+      updateItem(itemId, { status: "sending", progress: 15 });
+
+      let p = 15;
+      interval = setInterval(() => {
+        const current = itemsRef.current.find(i => i.id === itemId);
+        if (!current || ["completed", "failed"].includes(current.status)) {
+          clearInterval(interval);
+          return;
+        }
+        p = Math.min(p + Math.random() * 2.5 + 0.3, 92);
+        let stage = "processing";
+        if (p > 80) stage = "ai";
+        else if (p > 60) stage = "ocr";
+        else if (p > 40) stage = "extracting";
+        else if (p > 20) stage = "processing";
+
+        updateItem(itemId, { progress: Math.round(p), status: stage });
+      }, 700);
+    }, 400);
+  };
+
+  const stop = () => {
+    clearTimeout(timeout);
+    clearInterval(interval);
+  };
+
+  return { start, stop };
+}
+
+
 export function useQueueProcessor(queueApi) {
   const {
     items,
@@ -41,25 +80,26 @@ export function useQueueProcessor(queueApi) {
 
   async function processItem(index) {
     const item = itemsRef.current[index];
-
-    if (!item) {
-      return;
-    }
+    if (!item) return;
 
     setCurrentIndex(index);
 
     updateItem(item.id, {
-      status: "processing",
+      status: "uploading",
       progress: 0,
       error: null,
       startedAt: new Date().toISOString()
     });
+
+    const simulator = createProgressSimulator(item.id, updateItem, itemsRef);
+    simulator.start();
 
     try {
       const result = await queueManager.process(
         item.file,
         {
           onProgress(progress) {
+            // Real backend progress overrides simulation
             updateItem(item.id, {
               progress: progress.progress,
               status: progress.stage
@@ -67,6 +107,8 @@ export function useQueueProcessor(queueApi) {
           }
         }
       );
+
+      simulator.stop();
 
       updateItem(item.id, {
         status: "completed",
@@ -76,21 +118,17 @@ export function useQueueProcessor(queueApi) {
       });
 
     } catch (err) {
-      console.error('Process error:', err.message, err.code);
+      simulator.stop();
+      console.error("Process error:", err.message, err.code);
 
-      // Handle 402 payment/auth errors
-      if (err.status === 402 || err.code === 'GUEST_LIMIT_REACHED' || err.code === 'INSUFFICIENT_CREDITS' || err.code === 'GUEST_EXPIRED') {
-        
-        // Guest limit reached or expired — show signup modal
-        if (err.code === 'GUEST_LIMIT_REACHED' || err.code === 'GUEST_EXPIRED') {
-          window.dispatchEvent(new CustomEvent('showAuthModal', {
-            detail: { mode: 'signup' }
+      if (err.status === 402 || err.code === "GUEST_LIMIT_REACHED" || err.code === "INSUFFICIENT_CREDITS" || err.code === "GUEST_EXPIRED") {
+        if (err.code === "GUEST_LIMIT_REACHED" || err.code === "GUEST_EXPIRED") {
+          window.dispatchEvent(new CustomEvent("showAuthModal", {
+            detail: { mode: "signup" }
           }));
         }
-        
-        // Insufficient credits — show buy credits modal with context
-        if (err.code === 'INSUFFICIENT_CREDITS') {
-          window.dispatchEvent(new CustomEvent('showBuyCredits', {
+        if (err.code === "INSUFFICIENT_CREDITS") {
+          window.dispatchEvent(new CustomEvent("showBuyCredits", {
             detail: {
               required: err.required || 1,
               available: err.available || 0,
@@ -103,16 +141,14 @@ export function useQueueProcessor(queueApi) {
           status: "failed",
           error: err.message,
           errorCode: err.code,
-          needsAction: err.code === 'INSUFFICIENT_CREDITS' ? 'buy-credits' : 'signup',
+          needsAction: err.code === "INSUFFICIENT_CREDITS" ? "buy-credits" : "signup",
           completedAt: new Date().toISOString()
         });
 
-        // Pause queue so user can take action
         queueApi.pause();
         return;
       }
 
-      // All other errors
       updateItem(item.id, {
         status: "failed",
         error: err.message,
@@ -122,27 +158,30 @@ export function useQueueProcessor(queueApi) {
     }
   }
 
-  //----------------------------------------------------
-  // Queue loop — sequential, one at a time
-  //----------------------------------------------------
+// ── Replace the useEffect at the bottom ──
 
   useEffect(() => {
     if (!processingRef.current) return;
     if (pausedRef.current) return;
     if (isRunningRef.current) return;
 
-    const next = findNextQueued();
+    async function runNext() {
+      const next = findNextQueued();
+      if (next === -1) {
+        stop();
+        return;
+      }
 
-    if (next === -1) {
-      stop();
-      return;
+      isRunningRef.current = true;
+      await processItem(next);
+      isRunningRef.current = false;
+
+      // Chain to next item without waiting for a dependency change
+      if (processingRef.current && !pausedRef.current) {
+        setTimeout(runNext, 0);
+      }
     }
 
-    isRunningRef.current = true;
-
-    processItem(next).finally(() => {
-      isRunningRef.current = false;
-    });
-
-  }, [processing, paused, items, stop, setCurrentIndex, updateItem, queueApi]);
+    runNext();
+  }, [processing, paused, stop, setCurrentIndex, updateItem, queueApi]);
 }

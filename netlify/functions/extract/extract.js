@@ -55,23 +55,35 @@ function calculatePageCost(text) {
 
 function applyCorrections(extractedData, corrections) {
   if (!extractedData.segments) return extractedData;
-  
+
   extractedData.segments.forEach((seg) => {
-    (seg.fields || []).forEach((field) => {
+    (seg.fields || []).forEach((field, fieldIdx) => {
       const key = `${seg.segment_name}.${field.label}`;
+
       if (corrections[key]) {
-        field.value = corrections[key].to;
+        if (corrections[key].action === "delete") {
+          field._deleted = true;
+        } else {
+          field.value = corrections[key].to;
+        }
       }
+
       const labelKey = `${key}._label`;
       if (corrections[labelKey]) {
-        field.label = corrections[labelKey].to;
+        if (corrections[labelKey].action === "delete") {
+          field._deleted = true;
+        } else {
+          field.label = corrections[labelKey].to;
+        }
       }
     });
+
+    // Remove deleted fields before normalization runs
+    seg.fields = (seg.fields || []).filter((f) => !f._deleted);
   });
-  
+
   return extractedData;
 }
-
 
 exports.handler = async (event, context) => {
   context.callbackWaitsForEmptyEventLoop = false;
@@ -388,14 +400,45 @@ if (!isGuest && userId) {
 
 
 
+        // 1. Normalize the RAW AI output FIRST (before any corrections)
+    const rawSegments = normalizeSegments(Array.isArray(extractedData.segments) ? extractedData.segments : []);
+    const originalSegments = JSON.parse(JSON.stringify(rawSegments));
+
+        // ── Fallback: exact fingerprint missed → try document type ──
+    if (!isGuest && userId && !savedPattern) {
+      const docType = (extractedData.document_type || extractedData.category || "unknown")
+        .toString()
+        .toLowerCase()
+        .trim();
+
+      const { data: typePatterns } = await supabase
+        .from("extraction_patterns")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("document_type", docType)
+        .order("last_used_at", { ascending: false })
+        .limit(1);
+
+      if (typePatterns && typePatterns.length > 0) {
+        savedPattern = typePatterns[0];
+        patternApplied = true;
+
+        await supabase
+          .from("extraction_patterns")
+          .update({
+            usage_count: typePatterns[0].usage_count + 1,
+            last_used_at: new Date().toISOString(),
+          })
+          .eq("id", typePatterns[0].id);
+      }
+    }
+
+    // 2. Apply saved pattern corrections to a fresh copy for display/export
+    extractedData.segments = JSON.parse(JSON.stringify(rawSegments));
     if (savedPattern && savedPattern.corrections) {
-    extractedData = applyCorrections(extractedData, savedPattern.corrections);
-   }
-
-   // Normalize and preserve original
-   const originalSegments = normalizeSegments(Array.isArray(extractedData.segments) ? extractedData.segments : []);
-   const segments = JSON.parse(JSON.stringify(originalSegments));
-
+      extractedData = applyCorrections(extractedData, savedPattern.corrections);
+    }
+    const segments = extractedData.segments;
 
     // Update transaction to completed
     if (!isGuest && userId && transactionId) {

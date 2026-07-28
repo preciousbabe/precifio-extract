@@ -19,6 +19,7 @@
         "npm:adm-zip@~0.5.17",
         "npm:docx@^9.7.1",
         "npm:exceljs@^4.4.0",
+        "npm:file-saver@^2.0.5",
         "npm:jsdom@24",
         "npm:jszip@^3.10.1",
         "npm:openai@^4.47.1",

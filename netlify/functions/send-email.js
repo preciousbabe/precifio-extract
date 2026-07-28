@@ -1,0 +1,286 @@
+// netlify/functions/send-email.js
+
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const exporter = require("./integrations/export");
+
+const headers = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Content-Type": "application/json"
+};
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function formatLabel(key) {
+  return String(key)
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, c => c.toUpperCase());
+}
+
+/**
+ * Flattens objects exactly like PDF/DOCX/Excel instead of JSON.stringify
+ */
+function formatValue(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return escapeHtml(value);
+  if (typeof value === "number") return escapeHtml(String(value));
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (Array.isArray(value)) return value.map(v => formatValue(v)).join(", ");
+  if (typeof value === "object") {
+    return Object.entries(value)
+      .map(([k, v]) => `${formatLabel(k)}: ${formatValue(v)}`)
+      .join(" | ");
+  }
+  return escapeHtml(String(value));
+}
+
+function renderSegment(segment) {
+  const fields = Array.isArray(segment.fields) ? segment.fields : [];
+
+  const isTable =
+    fields.length > 1 &&
+    fields.every(
+      f => f && f.value && typeof f.value === "object" && !Array.isArray(f.value)
+    );
+
+  let html = `
+<div style="margin-top:32px;">
+  <h2 style="margin:0 0 14px;font-size:18px;color:#1e40af;">
+    ${escapeHtml(segment.segment_name || "Segment")}
+  </h2>
+`;
+
+  if (isTable) {
+    const columns = Object.keys(fields[0].value || {});
+    html += `
+<table width="100%" cellpadding="8" cellspacing="0" style="border-collapse:collapse;font-size:14px;border:1px solid #d1d5db;">
+  <thead>
+    <tr style="background:#eff6ff;">
+      ${columns
+        .map(col => `<th align="left" style="border:1px solid #d1d5db;font-weight:600;">${escapeHtml(formatLabel(col))}</th>`)
+        .join("")}
+    </tr>
+  </thead>
+  <tbody>
+    ${fields
+      .map(row => {
+        const cells = columns
+          .map(col => `<td style="border:1px solid #e5e7eb;">${formatValue(row.value[col])}</td>`)
+          .join("");
+        return `<tr>${cells}</tr>`;
+      })
+      .join("")}
+  </tbody>
+</table>`;
+  } else {
+    html += `
+<table width="100%" cellpadding="8" cellspacing="0" style="border-collapse:collapse;font-size:14px;border:1px solid #d1d5db;">
+  ${fields
+    .map(
+      field => `
+  <tr>
+    <td style="font-weight:bold;width:220px;background:#f9fafb;border:1px solid #e5e7eb;">${escapeHtml(field.label || "")}</td>
+    <td style="border:1px solid #e5e7eb;white-space:pre-wrap;">${formatValue(field.value)}</td>
+  </tr>`
+    )
+    .join("")}
+</table>`;
+  }
+
+  html += `</div>`;
+  return html;
+}
+
+function buildHtml(payload, config = {}) {
+  const cfg = { branding: { companyName: "", showMetadata: true }, ...config };
+  const brandName = cfg.branding.companyName || "Document Extraction";
+  const showMeta = cfg.branding.showMetadata !== false;
+  const fileName = escapeHtml(payload.fileName || "document");
+  const extractedAt = payload.extractedAt
+    ? new Date(payload.extractedAt).toLocaleString()
+    : new Date().toLocaleString();
+
+  let html = `
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${escapeHtml(brandName)}</title>
+</head>
+<body style="font-family:Arial,Helvetica,sans-serif;background:#f3f4f6;padding:30px;margin:0;">
+<div style="max-width:900px;margin:auto;background:white;border-radius:10px;padding:35px;border:1px solid #e5e7eb;">
+
+  ${cfg.branding.companyName ? `<h1 style="margin-top:0;color:#1e40af;font-size:24px;">${escapeHtml(cfg.branding.companyName)}</h1>` : ""}
+
+  <p style="color:#374151;font-size:15px;line-height:1.6;">
+    Your document has been successfully extracted.
+  </p>
+
+  ${showMeta ? `
+  <table cellpadding="8" cellspacing="0" style="border-collapse:collapse;margin-top:20px;margin-bottom:30px;font-size:14px;color:#374151;">
+    <tr><td style="font-weight:600;padding-right:24px;">Document</td><td>${fileName}</td></tr>
+    <tr><td style="font-weight:600;padding-right:24px;">Extracted</td><td>${extractedAt}</td></tr>
+    ${payload.documentSummary ? `<tr><td style="font-weight:600;padding-right:24px;">Summary</td><td>${escapeHtml(payload.documentSummary)}</td></tr>` : ""}
+  </table>` : ""}
+
+  ${(Array.isArray(payload.segments) ? payload.segments : []).map(renderSegment).join("")}
+
+  <div style="margin-top:40px;padding-top:20px;border-top:1px solid #e5e7eb;font-size:12px;color:#6b7280;text-align:center;">
+    ${cfg.branding.companyName ? `Generated by <strong>${escapeHtml(cfg.branding.companyName)}</strong>` : ""}
+  </div>
+
+</div>
+</body>
+</html>`;
+
+  return html;
+}
+
+function buildText(payload, config = {}) {
+  const cfg = { branding: { companyName: "" }, ...config };
+  const brandName = cfg.branding.companyName || "Document Extraction";
+  const lines = [
+    `${brandName}`,
+    ``,
+    `Document: ${payload.fileName || "document"}`,
+    `Extracted: ${payload.extractedAt ? new Date(payload.extractedAt).toLocaleString() : new Date().toLocaleString()}`,
+  ];
+  if (payload.documentSummary) lines.push(`Summary: ${payload.documentSummary}`);
+  lines.push(``);
+  lines.push(`Generated by ${brandName}`);
+  return lines.join("\n");
+}
+
+exports.handler = async (event, context) => {
+  context.callbackWaitsForEmptyEventLoop = false;
+
+  if (event.httpMethod === "OPTIONS") {
+    return { statusCode: 204, headers, body: "" };
+  }
+
+  if (event.httpMethod !== "POST") {
+    return { statusCode: 405, headers, body: JSON.stringify({ error: "Method not allowed" }) };
+  }
+
+  if (!RESEND_API_KEY) {
+    return { statusCode: 500, headers, body: JSON.stringify({ error: "RESEND_API_KEY is missing." }) };
+  }
+
+  try {
+    const body = JSON.parse(event.body || "{}");
+    const { to, subject, model, config, exportFormat } = body;
+
+    if (!to) {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: "Recipient email is required." }) };
+    }
+
+    if (!subject) {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: "Subject is required." }) };
+    }
+
+    if (!model) {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: "Payload (model) is required." }) };
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(to)) {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: "Invalid recipient email." }) };
+    }
+
+    // Build email bodies
+    const html = buildHtml(model, config);
+    const text = buildText(model, config);
+
+    // Prepare Resend payload
+    const fromName = config?.branding?.companyName
+      ? `${config.branding.companyName} <noreply@precifio.app>`
+      : "Document Extraction <noreply@precifio.app>";
+
+    const resendPayload = {
+      from: fromName,
+      to,
+      subject,
+      html,
+      text
+    };
+
+    // ── Attachment generation (PDF, JSON, Excel, DOCX) ──
+    if (exportFormat) {
+      const format = String(exportFormat).toLowerCase();
+
+      if (!exporter.supports(format)) {
+        return {
+          statusCode: 400,
+          headers,
+          body: JSON.stringify({
+            error: `Unsupported export format: ${exportFormat}`,
+            supported: exporter.listFormats()
+          })
+        };
+      }
+
+      const exportResult = await exporter.generateExport({
+        model,
+        format,
+        config
+      });
+
+      resendPayload.attachments = [
+        {
+          filename: exportResult.fileName,
+          content: exportResult.buffer.toString("base64")
+        }
+      ];
+    }
+
+    const resendResponse = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${RESEND_API_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(resendPayload)
+    });
+
+    const resendResult = await resendResponse.json();
+
+    if (!resendResponse.ok) {
+      console.error("Resend API Error:", resendResult);
+      return {
+        statusCode: resendResponse.status,
+        headers,
+        body: JSON.stringify({
+          error: resendResult.message || resendResult.error || "Failed to send email.",
+          details: resendResult
+        })
+      };
+    }
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({
+        success: true,
+        message: "Email sent successfully.",
+        ...(exportFormat ? { attachmentFormat: exportFormat } : {}),
+        resend: resendResult
+      })
+    };
+  } catch (err) {
+    console.error("send-email error:", err);
+    return {
+      statusCode: 500,
+      headers,
+      body: JSON.stringify({ error: err.message || "Internal server error." })
+    };
+  }
+};

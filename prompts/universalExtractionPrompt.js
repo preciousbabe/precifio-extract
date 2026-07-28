@@ -210,6 +210,7 @@ const UNIVERSAL_EXTRACTION_PROMPT = [
   "1. Did I set `segment_type` explicitly?",
   "2. If `table`: does it pass ALL 4 TABLE TEST conditions? Does each row represent one record? Is there more than one row?",
   "3. If `detail`: does every field have a descriptive `label` and a plain-string `value`?",
+  '3a. Scalar values must ALWAYS be plain strings.** Even if a value contains colons, commas, slashes, or other punctuation, it must remain a single string. NEVER parse a scalar value into a nested object or split it on punctuation. Example: a date/time like "2026-06-20 14:32" must be extracted as the single string "2026-06-20 14:32". It must NEVER become {"2026-06-20 14": "32"} or any other object structure.',
   "4. Did I accidentally put PO Number / dates / status / totals / party blocks into a table? If yes, move them to `detail`.",
   "",
   "## REMEMBER",

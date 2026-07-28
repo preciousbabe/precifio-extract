@@ -796,3 +796,81 @@
     font-size: 13px;
   }
 }
+
+
+/* Export All Button */
+.export-all-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.export-all-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: #1e40af;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.export-all-btn:hover:not(:disabled) {
+  background: #1e3a8a;
+}
+
+.export-all-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.export-all-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  width: 200px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 6px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.12);
+  z-index: 9999;
+}
+
+.export-all-header {
+  padding: 8px 10px 4px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #9ca3af;
+  border-bottom: 1px solid #f3f4f6;
+  margin-bottom: 4px;
+}
+
+.export-all-option {
+  display: block;
+  width: 100%;
+  padding: 9px 10px;
+  border: none;
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  text-align: left;
+  color: #374151;
+  transition: background 0.15s ease;
+}
+
+.export-all-option:hover:not(:disabled) {
+  background: #f3f4f6;
+}
+
+.export-all-option:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}

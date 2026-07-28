@@ -31,17 +31,6 @@ const TYPES = Object.freeze({
 
   }),
 
-  csv: Object.freeze({
-
-    id: "csv",
-
-    displayName: "CSV",
-
-    extension: "csv",
-
-    mimeType: "text/csv"
-
-  }),
 
   excel: Object.freeze({
 
