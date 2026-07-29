@@ -322,19 +322,14 @@ console.log(pending);
       }
     }
 
-return {
-
-  statusCode: 302,
-
-  headers: {
-
-    Location:
-      "http://localhost:8888"
-
-  }
-
-};
-  }
+    const redirectUrl = process.env.OAUTH_REDIRECT_URL || "http://localhost:8888";
+    return {
+      statusCode: 302,
+      headers: {
+        Location: redirectUrl
+      }
+    };
+    }
 
   catch (error) {
 

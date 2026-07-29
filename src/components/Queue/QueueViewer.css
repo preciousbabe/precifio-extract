@@ -624,7 +624,6 @@
   width: min(320px, calc(100vw - 32px));
   max-height: min(70vh, 500px);
   overflow-y: auto;
-  overflow-x: hidden;
   background: #fff;
   border: 1px solid #e5e7eb;
   border-radius: 16px;
@@ -683,18 +682,14 @@
 }
 
 .submenu {
-  position: absolute;
-  top: -8px;
-  right: calc(100% + 8px);
-  left: auto;
-  width: 220px;
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 14px;
-  padding: 8px;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.12);
+  position: static;      /* instead of absolute */
+  width: 100%;
+  margin-top: 8px;
+  box-shadow: none;
+  border: 1px solid #f3f4f6;
   z-index: 9999999;
 }
+
 
 .submenu-arrow {
   margin-left: auto;
