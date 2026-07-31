@@ -1,14 +1,19 @@
 // src/components/AuthModal.jsx
 import { useAuth } from '../hooks/useAuth';
-import { Auth } from './Auth';  // or wherever you save the Auth component
+import { Auth } from './Auth';
 
 export default function AuthModal() {
   const { showAuthModal, setShowAuthModal, authModalMode } = useAuth();
 
+  // NEW: pull token stored by App.jsx when user lands from reset email
+  const resetToken = typeof window !== 'undefined'
+    ? localStorage.getItem('precifio_reset_token')
+    : null;
+
   if (!showAuthModal) return null;
 
   return (
-    <div 
+    <div
       style={{
         position: 'fixed',
         inset: 0,
@@ -20,7 +25,7 @@ export default function AuthModal() {
       }}
       onClick={() => setShowAuthModal(false)}
     >
-      <div 
+      <div
         style={{
           background: '#fff',
           borderRadius: '12px',
@@ -46,7 +51,9 @@ export default function AuthModal() {
         >
           ×
         </button>
-        <Auth initialMode={authModalMode} />
+
+        {/* NEW: pass resetToken through */}
+        <Auth initialMode={authModalMode} resetToken={resetToken} />
       </div>
     </div>
   );

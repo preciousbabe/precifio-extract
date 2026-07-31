@@ -1,10 +1,8 @@
-// netlify/functions/generate-export.js
-
 "use strict";
 
-const exporter = require("./integrations/export");
+const exporter  = require("./integrations/export");
 const responses = require("./integrations/responses");
-const logger = require("./integrations/logger");
+const logger    = require("./integrations/logger");
 
 exports.handler = async (event) => {
   if (event.httpMethod !== "POST") {
@@ -13,16 +11,11 @@ exports.handler = async (event) => {
 
   try {
     const body = JSON.parse(event.body || "{}");
-    const { model, format, config } = JSON.parse(event.body || "{}");
+    /* FIX: destructure from the already-parsed body */
+    const { model, format, config } = body;
 
-    if (!model) {
-      return responses.badRequest("Export model is required.");
-    }
-
-    if (!format) {
-      return responses.badRequest("Export format is required.");
-    }
-
+    if (!model)  return responses.badRequest("Export model is required.");
+    if (!format) return responses.badRequest("Export format is required.");
     if (!exporter.supports(format)) {
       return responses.badRequest(`Unsupported export format: ${format}`);
     }
@@ -55,3 +48,4 @@ exports.handler = async (event) => {
     return responses.serverError(error.message || "Unable to generate export.");
   }
 };
+

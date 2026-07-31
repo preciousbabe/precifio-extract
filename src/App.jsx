@@ -42,6 +42,29 @@ function AppContent() {
     }
   }, [setShowAuthModal, setAuthModalMode]);
 
+
+  // App.jsx
+useEffect(() => {
+  // Handle password reset landing from email link
+  const hash = window.location.hash; // #access_token=...&type=recovery
+  const search = new URLSearchParams(window.location.search);
+
+  if (search.get('mode') === 'reset' || hash.includes('type=recovery')) {
+    const hashParams = new URLSearchParams(hash.replace('#', ''));
+    const token = hashParams.get('access_token');
+
+    if (token) {
+      // Pass token to AuthModal via a global or context; simplest is localStorage
+      localStorage.setItem('precifio_reset_token', token);
+      setAuthModalMode('reset');
+      setShowAuthModal(true);
+    }
+
+    // Clean URL so the token doesn't sit in the address bar
+    window.history.replaceState({}, '', window.location.pathname);
+  }
+}, [setAuthModalMode, setShowAuthModal]);
+
   // Listen for insufficient credits event from queue processor
   useEffect(() => {
     const handleShowBuyCredits = (e) => {

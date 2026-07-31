@@ -76,6 +76,25 @@
     li { margin-bottom: 8px; }
     a { color: var(--accent); text-decoration: none; }
     a:hover { text-decoration: underline; }
+
+    .email-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .gmail-fallback {
+      font-size: 0.8rem;
+      color: #64748b;
+      background: #f1f5f9;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-weight: 500;
+    }
+    .gmail-fallback:hover {
+      background: #e2e8f0;
+    }
+
     .footer {
       margin-top: 48px;
       padding-top: 24px;
@@ -89,7 +108,7 @@
       h1 { font-size: 1.4rem; }
     }
   </style>
-<base target="_blank">
+  <!-- NO <base target="_blank"> -->
 </head>
 <body>
   <div class="container">
@@ -138,7 +157,11 @@
     <p>We may update these terms from time to time. Continued use of the service after changes constitutes acceptance of the revised terms.</p>
 
     <h2>9. Contact</h2>
-    <p>For questions about these terms, contact us at <a href="mailto:support@precifio.app">support@precifio.app</a>.</p>
+    <p>For questions about these terms, contact us at:</p>
+    <p class="email-row">
+      <a href="mailto:support@precifio.app">support@precifio.app</a>
+      <a class="gmail-fallback" href="https://mail.google.com/mail/?view=cm&fs=1&to=support@precifio.app&su=Terms%20Question%20-%20Precifio%20Extract" target="_blank" rel="noopener noreferrer">Open in Gmail ↗</a>
+    </p>
 
     <div class="footer">
       &copy; 2026 Precifio Extract. <a href="/">Back to app</a> &middot; <a href="/privacy">Privacy Policy</a> &middot; <a href="/support">Support</a>

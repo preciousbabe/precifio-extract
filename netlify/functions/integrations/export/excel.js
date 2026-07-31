@@ -37,6 +37,7 @@ function isNumeric(str) {
   return str.trim() !== "" && !isNaN(str) && !isNaN(parseFloat(str));
 }
 
+
 function setCellValue(cell, raw) {
   if (raw === null || raw === undefined) {
     cell.value = "";
@@ -54,6 +55,14 @@ function setCellValue(cell, raw) {
     cell.value = parseFloat(raw);
     return;
   }
+
+  // ── ADD THIS BLOCK ──
+  if (typeof raw === "object") {
+    cell.value = formatFieldValue(raw);
+    return;
+  }
+  // ────────────────────
+
   cell.value = String(raw);
 }
 
