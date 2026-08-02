@@ -38,6 +38,30 @@ exports.handler = async (event, context) => {
       return { statusCode: 401, headers, body: JSON.stringify({ error: 'Invalid token' }) };
     }
 
+        // Validate package
+    const VALID_PACKAGES = {
+      starter:    { credits: 100,  price: 1000 },
+      growth:     { credits: 275,  price: 2500 },
+      business:   { credits: 600,  price: 5000 },
+      enterprise: { credits: 1300, price: 10000 }
+    };
+    const pkg = VALID_PACKAGES[package_id];
+    if (!pkg || pkg.price !== amount || pkg.credits !== credit_amount) {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid package' }) };
+    }
+
+    // First purchase minimum ($10)
+        const { data: priorPurchases } = await supabase
+      .from('credit_transactions')
+      .select('id')
+      .eq('user_id', user_id)
+      .eq('type', 'purchase')
+      .limit(1);
+
+    if (!priorPurchases?.length && amount < 1000) {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: 'Minimum first purchase is $10' }) };
+    }
+
     // Call Paystack API
     const response = await fetch('https://api.paystack.co/transaction/initialize', {
       method: 'POST',

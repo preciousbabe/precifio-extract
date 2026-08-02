@@ -26,45 +26,6 @@ const validation = require("./validation");
 
 const providers = Object.freeze({
 
-  xero: Object.freeze({
-    id: "xero",
-    displayName: "Xero",
-    oauth: require("./oauth/xero"),
-    provider: require("./providers/xero"),
-    prompt: require("./prompts/xero"),
-
-    env: Object.freeze({
-    clientId: "XERO_CLIENT_ID",
-    clientSecret: "XERO_CLIENT_SECRET",
-    redirectUri: "XERO_REDIRECT_URI"
-   }),
-
-    capabilities: Object.freeze([
-      "oauth",
-      "transform",
-      "send"
-    ])
-  }),
-
-  quickbooks: Object.freeze({
-    id: "quickbooks",
-    displayName: "QuickBooks",
-    oauth: require("./oauth/quickbooks"),
-    provider: require("./providers/quickbooks"),
-    prompt: require("./prompts/quickbooks"),
-
-    env: Object.freeze({
-    clientId: "QUICKBOOKS_CLIENT_ID",
-    clientSecret: "QUICKBOOKS_CLIENT_SECRET",
-    redirectUri: "QUICKBOOKS_REDIRECT_URI"
-   }),
-
-    capabilities: Object.freeze([
-      "oauth",
-      "transform",
-      "send"
-    ])
-  }),
 
   slack: Object.freeze({
     id: "slack",
@@ -81,62 +42,6 @@ const providers = Object.freeze({
     provider: require("./providers/webhook"),
     capabilities: Object.freeze([
       "send"
-    ])
-  }),
-
-  "google-drive": Object.freeze({
-  id: "google-drive",
-  displayName: "Google Drive",
-
-  oauth: require("./oauth/google-drive"),
-  provider: require("./upload/google-drive"),
-
-  env: Object.freeze({
-    clientId: "GOOGLE_DRIVE_CLIENT_ID",
-    clientSecret: "GOOGLE_DRIVE_CLIENT_SECRET",
-    redirectUri: "GOOGLE_DRIVE_REDIRECT_URI"
-  }),
-
-  capabilities: Object.freeze([
-    "oauth",
-    "upload"
-  ])
-}),
-
-
-  dropbox: Object.freeze({
-    id: "dropbox",
-    displayName: "Dropbox",
-    oauth: require("./oauth/dropbox"),
-    provider: require("./upload/dropbox"),
-
-    env: Object.freeze({
-    clientId: "DROPBOX_CLIENT_ID",
-    clientSecret: "DROPBOX_CLIENT_SECRET",
-    redirectUri: "DROPBOX_REDIRECT_URI"
-}),
-
-    capabilities: Object.freeze([
-      "oauth",
-      "upload"
-    ])
-  }),
-
-  onedrive: Object.freeze({
-    id: "onedrive",
-    displayName: "OneDrive",
-    oauth: require("./oauth/onedrive"),
-    provider: require("./upload/onedrive"),
-
-    env: Object.freeze({
-    clientId: "ONEDRIVE_CLIENT_ID",
-    clientSecret: "ONEDRIVE_CLIENT_SECRET",
-    redirectUri: "ONEDRIVE_REDIRECT_URI"
-   }),
-
-    capabilities: Object.freeze([
-      "oauth",
-      "upload"
     ])
   }),
 

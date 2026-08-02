@@ -25,6 +25,31 @@ exports.handler = async (event, context) => {
 
   const { email, password, fullName, companyName } = JSON.parse(event.body);
 
+    // ── Block disposable emails ──
+  const DISPOSABLE_DOMAINS = new Set([
+    'tempmail.com','mailinator.com','guerrillamail.com','yopmail.com',
+    'sharklasers.com','getairmail.com','10minutemail.com','burnermail.io',
+    'temp-mail.org','fakeemail.com','trashmail.com','mailnesia.com',
+    'dispostable.com','mailcatch.com','getnada.com','inboxbear.com',
+    'tempail.com','throwawaymail.com','emailondeck.com','tempmailbox.net',
+    'fakeinbox.com','mailforspam.com','spamgourmet.com','maildrop.cc',
+    'harakirimail.com','temp-mail.ru','prtnx.com','ruru.be','mt2015.com',
+    'trbvm.com','urltc.com','vomoto.com','wmail.cf','yomail.info',
+    'zoho.in','kost.party','kiabws.com','vssms.com','xvx.us','yxdad.com',
+    'zainmax.net','zippymail.info','zoemail.org','zomg.info','bccto.me',
+    'chacuo.net','tmpmail.org','tempm.com','temp-mail.io','throwaway.com'
+  ]);
+  
+  const domain = email.split('@')[1]?.toLowerCase().trim();
+  if (!domain || DISPOSABLE_DOMAINS.has(domain) || domain.includes('temp') || domain.includes('tmp') || domain.includes('throw') || domain.includes('fake') || domain.includes('trash')) {
+    return { 
+      statusCode: 400, 
+      headers, 
+      body: JSON.stringify({ error: 'Please use a permanent business email address' }) 
+    };
+  }
+  // ──────────────────────────────
+
   if (!email || !password || !fullName || !companyName) {
     return { statusCode: 400, headers, body: JSON.stringify({ error: 'All fields required' }) };
   }

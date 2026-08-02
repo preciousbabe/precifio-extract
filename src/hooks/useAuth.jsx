@@ -27,7 +27,7 @@ export function AuthProvider({ children }) {
       const data = await res.json();
       
       if (data.user) {
-        setUser(data.user);
+       setUser({ ...data.user, ...data.profile });
         setProfile(data.profile);
         setIsGuest(false);
         setGuestLimitReached(false);

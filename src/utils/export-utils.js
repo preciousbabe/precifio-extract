@@ -164,20 +164,29 @@ export async function connectIntegration({
 }
 
 
-function resolveIntegrationUrl({ envValue, storageKey, promptMessage }) {
+function resolveIntegrationUrl({ storageKey, promptMessage }) {
   const stored = localStorage.getItem(storageKey);
-  if (stored) return stored;
+
+  if (stored) {
+    const useSaved = window.confirm(
+      `Use saved URL?\n\n${stored}\n\nClick OK to use it, or Cancel to enter a different one.`
+    );
+    if (useSaved) return stored;
+    // User clicked Cancel — fall through to prompt
+  }
+
   const input = window.prompt(promptMessage);
   if (!input || !input.trim()) return null;
+
   const trimmed = input.trim();
   try { new URL(trimmed); } catch {
     alert("Please enter a valid URL (including https://).");
     return null;
   }
+
   localStorage.setItem(storageKey, trimmed);
   return trimmed;
 }
-
 
 /**
  * Send export to an integration.

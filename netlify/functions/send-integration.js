@@ -8,7 +8,7 @@ const auth = require("./integrations/auth");
 const responses = require("./integrations/responses");
 const logger = require("./integrations/logger");
 const exporter = require("./integrations/export");
-const uploader = require("./integrations/upload");
+
 
 exports.handler = async (event) => {
 
@@ -243,17 +243,6 @@ console.log({
       };
 
   
-  if (provider === "xero") {
-  if (!connection.provider_account_id) {
-    throw new Error("Xero tenant ID is missing. Reconnect your Xero account.");
-  }
-  sendOptions.tenantId = connection.provider_account_id;
-  } else if (provider === "quickbooks") {
-  if (!connection.provider_workspace_id) {
-    throw new Error("QuickBooks Realm ID is missing. Reconnect your QuickBooks account.");
-  }
-  sendOptions.realmId = connection.provider_workspace_id;
-  }
 
       const result = await client.send(sendOptions);
 

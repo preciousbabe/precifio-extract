@@ -6,6 +6,7 @@ import DocumentQueue from "./components/Queue/DocumentQueue";
 import NetworkStatus from "./components/NetworkStatus";
 import AuthModal from "./components/AuthModal";
 import { BuyCredits } from "./components/BuyCredits";
+import AdminDashboard from './components/AdminDashboard';
 import { useDocumentQueue } from "./hooks/useDocumentQueue";
 import { useQueueProcessor } from "./hooks/useQueueProcessor";
 import { useNetworkStatus } from "./hooks/useNetworkStatus";
@@ -27,6 +28,7 @@ function AppContent() {
   const [showBuyCredits, setShowBuyCredits] = useState(false);
   const [creditAlert, setCreditAlert] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
+    const [showAdmin, setShowAdmin] = useState(false);
   const queue = useDocumentQueue();
   const network = useNetworkStatus();
   
@@ -262,7 +264,29 @@ useEffect(() => {
         />
       )}
       
-      <ExportSettings isOpen={showSettings} onClose={() => setShowSettings(false)} />
+            <ExportSettings isOpen={showSettings} onClose={() => setShowSettings(false)} />
+
+      {/* Admin Panel Trigger */}
+            {user?.is_admin === true && (
+        <div style={{ position: 'fixed', bottom: 20, right: 20, zIndex: 9999 }}>
+          <button
+            onClick={() => setShowAdmin(!showAdmin)}
+            style={{
+              background: '#0f172a', color: '#fff', border: 'none',
+              borderRadius: 50, padding: '12px 20px', fontWeight: 600,
+              cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
+            }}
+          >
+            🛡️ {showAdmin ? 'Close' : 'Admin'}
+          </button>
+        </div>
+      )}
+
+      {showAdmin && (
+        <div style={{ position: 'fixed', inset: 0, background: '#f8fafc', zIndex: 9998, overflow: 'auto' }}>
+          <AdminDashboard />
+        </div>
+      )}
 
     </div>
   );

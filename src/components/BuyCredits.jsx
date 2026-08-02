@@ -2,12 +2,48 @@ import { useState } from 'react';
 
 const API_BASE = '/.netlify/functions';
 
-// Volume discount packages — cheaper per page as you buy more
+// AI Credit Packages — USD, volume bonuses, no page references
 const CREDIT_PACKAGES = [
-  { id: 'starter',    credits: 20,  price: 500,   label: 'Starter',    description: '20 pages',    pricePerPage: '$0.25/page',  popular: false },
-  { id: 'growth',     credits: 50,  price: 1000,  label: 'Growth',     description: '50 pages',    pricePerPage: '$0.20/page',  popular: true  },
-  { id: 'business',   credits: 120, price: 2200,  label: 'Business',   description: '120 pages',   pricePerPage: '$0.18/page',  popular: false },
-  { id: 'enterprise', credits: 300, price: 5000,  label: 'Enterprise', description: '300 pages',   pricePerPage: '$0.17/page',  popular: false },
+  { 
+    id: 'starter',    
+    credits: 100,  
+    price: 1000,   // $10.00
+    label: 'Starter',    
+    description: '100 AI Credits',
+    subtext: 'Perfect for getting started',
+    pricePerCredit: '$0.10 per credit',  
+    popular: false 
+  },
+  { 
+    id: 'growth',     
+    credits: 275,  
+    price: 2500,   // $25.00
+    label: 'Growth ⭐',     
+    description: '275 AI Credits',
+    subtext: '10% Bonus — Most Popular',
+    pricePerCredit: '$0.09 per credit',  
+    popular: true  
+  },
+  { 
+    id: 'business',   
+    credits: 600,  
+    price: 5000,   // $50.00
+    label: 'Business',   
+    description: '600 AI Credits',
+    subtext: '20% Bonus — Ideal for teams',
+    pricePerCredit: '$0.08 per credit',  
+    popular: false 
+  },
+  { 
+    id: 'enterprise', 
+    credits: 1300, 
+    price: 10000,  // $100.00
+    label: 'Enterprise', 
+    description: '1,300 AI Credits',
+    subtext: '30% Bonus — Best value',
+    pricePerCredit: '$0.07 per credit',  
+    popular: false 
+  },
 ];
 
 export function BuyCredits({ session, onClose, onSuccess, alert }) {
@@ -20,10 +56,7 @@ export function BuyCredits({ session, onClose, onSuccess, alert }) {
 
     try {
       const token = session?.access_token || localStorage.getItem('precifio_token');
-
-      if (!token) {
-        throw new Error('You must be logged in to purchase credits');
-      }
+      if (!token) throw new Error('Please sign in to purchase credits');
 
       const response = await fetch(`${API_BASE}/paystack-initiate`, {
         method: 'POST',
@@ -41,13 +74,9 @@ export function BuyCredits({ session, onClose, onSuccess, alert }) {
       });
 
       const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to initialize payment');
-      }
+      if (!response.ok) throw new Error(data.error || 'Payment initialization failed');
 
       window.location.href = data.authorization_url;
-
     } catch (err) {
       setError(err.message);
       setLoadingPkg(null);
@@ -68,20 +97,24 @@ export function BuyCredits({ session, onClose, onSuccess, alert }) {
       <div style={{
         background: '#fff',
         borderRadius: '16px',
-        maxWidth: '520px',
+        maxWidth: '560px',
         width: '100%',
         maxHeight: '90vh',
         overflow: 'auto',
         padding: '32px'
       }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-          <h2 style={{ margin: 0, fontSize: '24px' }}>Buy Credits</h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+          <h2 style={{ margin: 0, fontSize: '22px', color: '#0f172a' }}>Buy AI Credits</h2>
           <button onClick={onClose} style={{
             background: 'none', border: 'none', fontSize: '24px', cursor: 'pointer', color: '#6b7280'
           }}>×</button>
         </div>
 
-        {/* Contextual alert when opened from insufficient credits */}
+        <p style={{ color: '#64748b', marginBottom: '24px', fontSize: '14px', lineHeight: 1.5 }}>
+          AI Credits power every document processing task inside Precifio. 
+          Only successful processing consumes credits.
+        </p>
+
         {alert && (
           <div style={{ 
             padding: '14px 16px', 
@@ -93,17 +126,13 @@ export function BuyCredits({ session, onClose, onSuccess, alert }) {
             border: '1px solid #fca5a5'
           }}>
             <strong>Not enough credits.</strong><br/>
-            "{alert.fileName}" needs <strong>{alert.required} credit{alert.required > 1 ? 's' : ''}</strong>. 
-            You only have {alert.available}. Buy more to continue processing.
+            "{alert.fileName}" needs approximately <strong>{alert.required} credit{alert.required > 1 ? 's' : ''}</strong>. 
+            You have {alert.available}. Top up to continue.
           </div>
         )}
 
-        <p style={{ color: '#6b7280', marginBottom: '24px', fontSize: '14px' }}>
-          1 credit = 1 page processed. No charge for failed extractions.
-        </p>
-
         {error && (
-          <div style={{ padding: '12px', background: '#fee2e2', borderRadius: '8px', color: '#991b1b', marginBottom: '16px' }}>
+          <div style={{ padding: '12px', background: '#fee2e2', borderRadius: '8px', color: '#991b1b', marginBottom: '16px', fontSize: '14px' }}>
             {error}
           </div>
         )}
@@ -115,7 +144,7 @@ export function BuyCredits({ session, onClose, onSuccess, alert }) {
               onClick={() => !loadingPkg && handlePurchase(pkg)}
               style={{
                 padding: '20px',
-                border: pkg.popular ? '2px solid #10b981' : '1px solid #e5e7eb',
+                border: pkg.popular ? '2px solid #10b981' : '1px solid #e2e8f0',
                 borderRadius: '12px',
                 cursor: loadingPkg ? 'not-allowed' : 'pointer',
                 opacity: loadingPkg && loadingPkg !== pkg.id ? 0.5 : 1,
@@ -136,20 +165,24 @@ export function BuyCredits({ session, onClose, onSuccess, alert }) {
                   fontSize: '11px',
                   fontWeight: 600
                 }}>
-                  POPULAR
+                  MOST POPULAR
                 </span>
               )}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
-                  <div style={{ fontSize: '18px', fontWeight: 700, color: '#1a202c' }}>{pkg.label}</div>
-                  <div style={{ fontSize: '13px', color: '#6b7280', marginTop: '4px' }}>
+                  <div style={{ fontSize: '17px', fontWeight: 700, color: '#0f172a' }}>{pkg.label}</div>
+                  <div style={{ fontSize: '14px', color: '#334155', marginTop: '4px', fontWeight: 600 }}>
                     {pkg.description}
                   </div>
-                  <div style={{ fontSize: '13px', color: '#10b981', marginTop: '4px', fontWeight: 500 }}>
-                    {pkg.pricePerPage}
+                  <div style={{ fontSize: '12px', color: '#059669', marginTop: '2px', fontWeight: 500 }}>
+                    {pkg.subtext}
                   </div>
-                  <div style={{ fontSize: '22px', fontWeight: 700, color: '#1e40af', marginTop: '8px' }}>
-                    ${(pkg.price / 100).toFixed(2)} <span style={{ fontSize: '13px', fontWeight: 400, color: '#6b7280' }}>USD</span>
+                  <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
+                    {pkg.pricePerCredit}
+                  </div>
+                  <div style={{ fontSize: '24px', fontWeight: 700, color: '#1e40af', marginTop: '8px' }}>
+                    ${(pkg.price / 100).toFixed(0)}
+                    <span style={{ fontSize: '13px', fontWeight: 400, color: '#64748b' }}> USD</span>
                   </div>
                 </div>
                 <button 
@@ -163,7 +196,8 @@ export function BuyCredits({ session, onClose, onSuccess, alert }) {
                     fontWeight: 600,
                     cursor: 'pointer',
                     fontSize: '14px',
-                    opacity: loadingPkg === pkg.id ? 0.7 : 1
+                    opacity: loadingPkg === pkg.id ? 0.7 : 1,
+                    whiteSpace: 'nowrap'
                   }}
                 >
                   {loadingPkg === pkg.id ? '...' : 'Buy'}
@@ -173,7 +207,24 @@ export function BuyCredits({ session, onClose, onSuccess, alert }) {
           ))}
         </div>
 
-        <p style={{ fontSize: '12px', color: '#9ca3af', marginTop: '20px', textAlign: 'center' }}>
+        <div style={{ marginTop: '20px', padding: '14px', background: '#f8fafc', borderRadius: '10px' }}>
+          <div style={{ fontSize: '12px', color: '#475569', lineHeight: 1.6 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+              <span style={{ color: '#10b981' }}>✓</span> Credits never expire
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+              <span style={{ color: '#10b981' }}>✓</span> Only successful processing is charged
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+              <span style={{ color: '#10b981' }}>✓</span> Instant top-up
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ color: '#10b981' }}>✓</span> Secure payment
+            </div>
+          </div>
+        </div>
+
+        <p style={{ fontSize: '12px', color: '#94a3b8', marginTop: '16px', textAlign: 'center' }}>
           Secured by Paystack • Instant delivery • No charge for failed extractions
         </p>
       </div>

@@ -51,11 +51,13 @@ exports.handler = async (event, context) => {
         type: 'purchase',
         balance_after: newBalance,
         reference_id: data.reference,
-        metadata: {
+                metadata: {
           paystack_reference: data.reference,
           amount_paid_usd: data.amount / 100,
           payment_channel: data.channel,
-          paid_at: data.paid_at
+          paid_at: data.paid_at,
+          package_id: data.metadata?.package_id || null,
+          credit_amount: creditAmount
         }
       });
 

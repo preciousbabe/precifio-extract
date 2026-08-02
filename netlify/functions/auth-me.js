@@ -39,9 +39,9 @@ exports.handler = async (event, context) => {
       return { statusCode: 401, headers, body: JSON.stringify({ error: 'Invalid token' }) };
     }
 
-    const { data: profile, error: profileError } = await supabase
+        const { data: profile, error: profileError } = await supabase
       .from('profiles')
-      .select('*')
+      .select('*, is_admin')
       .eq('id', user.id)
       .maybeSingle();
 

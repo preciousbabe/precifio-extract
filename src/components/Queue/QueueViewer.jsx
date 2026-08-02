@@ -510,8 +510,6 @@ function ExportDropdown({ item, segments, onExport, user, disabled, config }) {
           await downloadExport({ payload, format: "docx", config });
           break;
 
-        case "xero":
-        case "quickbooks":
           if (!user) {
             alert("Please sign in to use integrations.");
             setExporting(null);
@@ -609,16 +607,6 @@ function ExportDropdown({ item, segments, onExport, user, disabled, config }) {
           </button>
           <button className="export-option" onClick={() => handleExport("docx")}>
             <IconWord /> Word (.docx)
-          </button>
-
-          <div className="export-divider" />
-          <div className="export-header">Accounting integrations</div>
-
-          <button className="export-option" onClick={() => handleExport("xero")}>
-            <IconXero /> Xero
-          </button>
-          <button className="export-option" onClick={() => handleExport("quickbooks")}>
-            <IconQuickBooks /> QuickBooks
           </button>
 
           <div className="export-divider" />

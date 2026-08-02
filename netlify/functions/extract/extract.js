@@ -47,10 +47,33 @@ function inferMimeType(filename) {
   return map[ext] || "application/octet-stream";
 }
 
-function calculatePageCost(text) {
+function estimateCreditCost(text, fileName = '') {
   const wordCount = text.split(/\s+/).filter((w) => w.length > 0).length;
-  const estimatedPages = Math.max(1, Math.ceil(wordCount / 500));
-  return Math.min(estimatedPages, 50);
+  const charCount = text.length;
+  let estimated = Math.max(0.5, wordCount / 400);
+
+  const lowerName = fileName.toLowerCase();
+  if (/bank|statement/.test(lowerName)) estimated *= 2.5;
+  else if (/invoice|bill/.test(lowerName)) estimated *= 1.2;
+  else if (/receipt/.test(lowerName)) estimated *= 0.8;
+
+  const numberDensity = charCount > 0 ? (text.match(/\d/g) || []).length / charCount : 0;
+  if (numberDensity > 0.15) estimated *= 1.3;
+
+  return Math.ceil(estimated * 2) / 2; // round to nearest 0.5
+}
+
+function calculateActualCost(documentType, textLength = 0) {
+  const rates = {
+    receipt: 0.7, invoice: 1.2, purchase_order: 1.6,
+    bank_statement: 4.8, insurance_claim: 7.2,
+    medical_report: 8.5, passport: 0.9, drivers_license: 0.8,
+    generic: 1.0
+  };
+  const rate = rates[documentType] || rates.generic;
+  // Token proxy: 1 token ≈ 4 chars
+  const tokenCost = (textLength / 4 / 1000) * 0.5;
+  return Math.round(Math.max(rate, Math.min(tokenCost, rate * 1.5)) * 10) / 10;
 }
 
 function applyCorrections(extractedData, corrections) {
@@ -107,9 +130,10 @@ exports.handler = async (event, context) => {
     };
   }
 
-  let transactionId = null;
-  let newBalance = null;
+    let transactionId = null;
+    let newBalance = null;
 
+  
   try {
     const extractionId = crypto.randomUUID();
     const parsed = parseMultipart(event);
@@ -164,7 +188,101 @@ exports.handler = async (event, context) => {
       }
     }
 
-    // Guest tracking
+    
+    
+        // ── Idempotency key: file hash + user/guest ──
+    const idempotencyKey = crypto
+      .createHash('sha256')
+      .update(file.buffer.toString('base64').slice(0, 8000) + (userId || guestId || 'guest'))
+      .digest('hex');
+
+    // Check for recent completed extraction (retry path)
+    const { data: cachedJob } = await supabase
+      .from('extractions')
+      .select('id, status, raw_result, actual_cost, estimated_cost, created_at')
+      .eq('idempotency_key', idempotencyKey)
+      .gt('created_at', new Date(Date.now() - 10 * 60 * 1000).toISOString())
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (cachedJob?.status === 'completed' && cachedJob.raw_result) {
+      // Fast path: skip AI entirely
+      const extractedData = cachedJob.raw_result;
+      const docType = (extractedData.document_type || extractedData.category || 'generic').toString().toLowerCase().trim();
+      
+      let rawSegments = normalizeSegments(Array.isArray(extractedData.segments) ? extractedData.segments : []);
+      const originalSegments = JSON.parse(JSON.stringify(rawSegments));
+      
+      // Note: skip pattern re-apply on cache hit to avoid needing documentFingerprint here
+      // (Patterns were already applied when the job first completed)
+
+            let currentBalance = null;
+      if (!isGuest && userId) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("credits_remaining")
+          .eq("id", userId)
+          .single();
+        currentBalance = profile?.credits_remaining ?? null;
+      }
+
+       // Only charge guest when they actually receive a result
+      if (isGuest && guestId) {
+        await supabase
+          .from("guest_extractions")
+          .update({ extraction_count: 1, last_used: new Date().toISOString() })
+          .eq("guest_id", guestId);
+      }
+
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({
+          success: true,
+          extractionId: cachedJob.id,
+          isGuest,
+          fileName: file.name,
+          fileType: validation.mimeType,
+          documentSummary: extractedData.document_summary,
+          documentType: docType,
+          originalSegments,
+          segments: extractedData.segments,
+          cached: true,
+          metadata: {
+            patternVersion: 1,
+            processedAt: new Date().toISOString(),
+                      extraction: {
+            finalMethod: 'cached',
+            textLength: 0,
+            wordCount: 0,
+            estimatedPages: cachedJob.estimated_cost,
+          },
+            creditsUsed: isGuest ? 0 : cachedJob.actual_cost,
+           newBalance: isGuest ? null : currentBalance,
+          },
+        }),
+      };
+    }
+
+    // If a job is still processing from a recent attempt, tell client to poll
+    if (cachedJob?.status === 'processing' && 
+        Date.now() - new Date(cachedJob.created_at).getTime() < 2 * 60 * 1000) {
+      return {
+        statusCode: 202,
+        headers,
+        body: JSON.stringify({
+          status: 'processing',
+          jobId: cachedJob.id,
+          message: 'Extraction in progress. Please poll for results.',
+          retryAfter: 3,
+        }),
+      };
+    }
+    // ──────────────────────────────────────────────
+
+
+           // Guest tracking with IP rate limit
     if (isGuest) {
       if (!guestId) {
         return {
@@ -173,6 +291,29 @@ exports.handler = async (event, context) => {
           body: JSON.stringify({
             error: "Guest ID required",
             code: "GUEST_ID_MISSING",
+            isGuest: true,
+          }),
+        };
+      }
+
+      const clientIp = event.headers['x-nf-client-connection-ip'] || 
+                       event.headers['x-forwarded-for']?.split(',')[0]?.trim() || 
+                       'unknown';
+
+      // Hard limit: 3 per IP ever
+      const { data: ipCheck } = await supabase
+        .from("guest_extractions")
+        .select("extraction_count")
+        .eq("ip_address", clientIp)
+        .maybeSingle();
+
+      if (ipCheck && ipCheck.extraction_count >= 3) {
+        return {
+          statusCode: 429,
+          headers,
+          body: JSON.stringify({
+            error: "Free extraction limit reached for this network. Please sign up to continue.",
+            code: "GUEST_IP_LIMIT_REACHED",
             isGuest: true,
           }),
         };
@@ -197,7 +338,6 @@ exports.handler = async (event, context) => {
             error: "Guest session expired (30 days). Please sign up to continue.",
             code: "GUEST_EXPIRED",
             isGuest: true,
-            daysActive: Math.floor(daysActive),
           }),
         };
       }
@@ -210,24 +350,16 @@ exports.handler = async (event, context) => {
             error: "Free extraction used (1/1). Sign up for more.",
             code: "GUEST_LIMIT_REACHED",
             isGuest: true,
-            extractionCount,
-            limit: 1,
           }),
         };
       }
 
-      if (guestRecord) {
-        await supabase
-          .from("guest_extractions")
-          .update({
-            extraction_count: extractionCount + 1,
-            last_used: new Date().toISOString(),
-          })
-          .eq("guest_id", guestId);
-      } else {
+            // Ensure record exists with count 0, but don't charge yet
+      if (!guestRecord) {
         await supabase.from("guest_extractions").insert({
           guest_id: guestId,
-          extraction_count: 1,
+          ip_address: clientIp,
+          extraction_count: 0,
           first_used: new Date().toISOString(),
           last_used: new Date().toISOString(),
         });
@@ -264,7 +396,71 @@ exports.handler = async (event, context) => {
       };
     }
 
-    const cost = calculatePageCost(cleanedText);
+
+    const cost = estimateCreditCost(cleanedText, file.name);
+
+            // ── Create extraction job record BEFORE slow AI call ──
+      const { data: jobRecord } = await supabase.from('extractions').insert({
+      id: extractionId,
+      idempotency_key: idempotencyKey,
+      user_id: userId || null,
+      guest_id: isGuest ? guestId : null,
+      document_type: 'unknown',
+      file_name: file.name,
+      estimated_cost: cost,
+      actual_cost: 0,
+      tokens_approx: Math.ceil(cleanedText.length / 4),
+      status: 'processing',
+      ocr_text: cleanedText.substring(0, 5000), // truncated for storage
+      created_at: new Date().toISOString()
+    }).select('id').single();
+    // ────────────────────────────────────────────────────
+
+        // ── Credit expiration: bonus credits die after 90 days ──
+    if (!isGuest && userId) {
+      const { data: userProfile } = await supabase
+        .from("profiles")
+        .select("created_at, credits_remaining")
+        .eq("id", userId)
+        .single();
+
+      const { data: hasPurchased } = await supabase
+        .from("credit_transactions")
+        .select("id")
+        .eq("user_id", userId)
+        .eq("type", "purchase")
+        .limit(1);
+
+      const accountAgeDays = (Date.now() - new Date(userProfile.created_at).getTime()) / (1000 * 60 * 60 * 24);
+
+      // If never purchased and account > 90 days old, bonus credits are dead
+      if (!hasPurchased?.length && accountAgeDays > 90 && userProfile.credits_remaining > 0) {
+        await supabase
+          .from("profiles")
+          .update({ credits_remaining: 0 })
+          .eq("id", userId);
+
+        await supabase.from("credit_transactions").insert({
+          user_id: userId,
+          amount: -userProfile.credits_remaining,
+          type: "expiry",
+          balance_after: 0,
+          status: "completed",
+          metadata: { reason: "signup_bonus_expired", account_age_days: Math.floor(accountAgeDays) }
+        });
+
+        return {
+          statusCode: 402,
+          headers,
+          body: JSON.stringify({
+            error: "Your welcome credits have expired after 90 days. Purchase credits to continue.",
+            code: "BONUS_EXPIRED",
+            expiredAmount: userProfile.credits_remaining,
+          }),
+        };
+      }
+    }
+    // ────────────────────────────────────────────────────────
 
     // Credit check & deduction
     if (!isGuest && userId) {
@@ -352,10 +548,59 @@ if (!isGuest && userId) {
 
     // AI extraction
     let extractedData;
+    let docType = 'generic';
+    let actualCost = cost; 
+
     try {
       const aiClient = new AIClient();
       extractedData = await aiClient.extract(cleanedText);
-    } catch (aiError) {
+
+          // ── Credit true-up after successful extraction ──
+      docType = (extractedData.document_type || extractedData.category || 'generic').toString().toLowerCase().trim();
+    actualCost = calculateActualCost(docType, cleanedText.length);
+    const refundAmount = Math.round((cost - actualCost) * 10) / 10;
+
+    
+    // Refund difference if we over-estimated (generosity mechanic)
+    if (!isGuest && userId && refundAmount > 0) {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("credits_remaining")
+        .eq("id", userId)
+        .single();
+
+      const refundedBalance = (profile?.credits_remaining || 0) + refundAmount;
+      await supabase.from("profiles").update({ credits_remaining: refundedBalance }).eq("id", userId);
+
+      await supabase.from("credit_transactions").insert({
+        user_id: userId,
+        amount: refundAmount,
+        type: "refund",
+        balance_after: refundedBalance,
+        status: "completed",
+        metadata: {
+          reason: "actual_cost_lower_than_estimate",
+          estimated: cost,
+          actual: actualCost,
+          file_name: file.name,
+          document_type: docType,
+        },
+      });
+
+      newBalance = refundedBalance;
+    }
+
+      
+    // ── Save raw result IMMEDIATELY (before Netlify can timeout) ──
+    await supabase.from('extractions').update({
+      status: 'completed',
+      raw_result: extractedData,
+      document_type: (extractedData.document_type || extractedData.category || 'generic').toString().toLowerCase().trim(),
+      actual_cost: actualCost,
+    }).eq('id', extractionId);
+    // ─────────────────────────────────────────────────────────────
+
+     } catch (aiError) {
       if (!isGuest && userId) {
         const { data: profile } = await supabase
           .from("profiles")
@@ -380,9 +625,21 @@ if (!isGuest && userId) {
           },
         });
 
-        if (transactionId) {
+                if (transactionId) {
           await supabase.from("credit_transactions").update({ status: "failed" }).eq("id", transactionId);
         }
+
+                // ── Mark extraction as failed ──
+                try {
+          await supabase.from('extractions').update({
+            status: 'failed',
+            error_message: aiError.message,
+            actual_cost: 0,
+          }).eq('id', extractionId);
+        } catch (e) {
+          // Silent fail — don't block the refund response
+        }
+        // ───────────────────────────────
 
         console.log(`Refunded ${cost} credits to user ${userId} due to AI error. Balance: ${refundedBalance}`);
       }
@@ -440,11 +697,21 @@ if (!isGuest && userId) {
     }
     const segments = extractedData.segments;
 
-    // Update transaction to completed
-    if (!isGuest && userId && transactionId) {
+        if (!isGuest && userId && transactionId) {
       const { error: updateError } = await supabase
         .from("credit_transactions")
-        .update({ status: "completed" })
+        .update({
+          status: "completed",
+          metadata: {
+            file_name: file.name,
+            estimated_cost: cost,
+            actual_cost: actualCost,
+            document_type: docType,
+            words: cleanedText.split(/\s+/).filter((w) => w.length > 0).length,
+            model: config.ai.provider,
+            chars: cleanedText.length,
+          }
+        })
         .eq("id", transactionId);
 
       if (updateError) {
@@ -452,6 +719,13 @@ if (!isGuest && userId) {
       }
     }
 
+        // Charge guest only after successful extraction
+    if (isGuest && guestId) {
+      await supabase
+        .from("guest_extractions")
+        .update({ extraction_count: 1, last_used: new Date().toISOString() })
+        .eq("guest_id", guestId);
+    }
     
     return {
       statusCode: 200,
