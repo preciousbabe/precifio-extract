@@ -1,5 +1,3 @@
-// integrations/export/docx.js
-
 "use strict";
 
 const {
@@ -76,7 +74,7 @@ async function exportDOCX(model, config = {}) {
 
   const children = [];
 
-  /* ── Optional Brand / Metadata ──────────────────────── */
+  /* ── Brand / Metadata ───────────────────────── */
   if (cfg.branding.companyName) {
     children.push(
       new Paragraph({
@@ -96,9 +94,7 @@ async function exportDOCX(model, config = {}) {
 
   if (cfg.branding.showMetadata !== false) {
     const metaParts = [];
-    if (docModel.fileName) {
-      metaParts.push(`Document: ${docModel.fileName}`);
-    }
+    if (docModel.fileName) metaParts.push(`Document: ${docModel.fileName}`);
     metaParts.push(new Date(docModel.extractedAt).toLocaleDateString("en-US", {
       year: "numeric", month: "long", day: "numeric",
       hour: "2-digit", minute: "2-digit"
@@ -118,7 +114,7 @@ async function exportDOCX(model, config = {}) {
     );
   }
 
-  /* ── Segments ─────────────────────────────────────────── */
+  /* ── Segments ───────────────────────────────── */
   for (const segment of docModel.segments || []) {
     const fields = segment.fields || [];
     if (!fields.length) continue;
@@ -137,6 +133,9 @@ async function exportDOCX(model, config = {}) {
 
     if (isTableSegment(segment)) {
       const columns = Object.keys(fields[0].value || {});
+      const colCount = columns.length;
+      const totalTwips = 9000;            // ~usable width for A4 with 1" margins
+      const colWidth   = Math.floor(totalTwips / Math.max(colCount, 1));
 
       const tableRows = [
         new TableRow({
@@ -144,7 +143,8 @@ async function exportDOCX(model, config = {}) {
             makeCell(formatLabel(col), {
               shading: COLORS.bgHeader,
               bold: true,
-              color: COLORS.primary
+              color: COLORS.primary,
+              width: colWidth
             })
           )
         })
@@ -155,7 +155,8 @@ async function exportDOCX(model, config = {}) {
         tableRows.push(new TableRow({
           children: columns.map(col =>
             makeCell(row[col] || "", {
-              shading: idx % 2 === 1 ? COLORS.bgAlt : undefined
+              shading: idx % 2 === 1 ? COLORS.bgAlt : undefined,
+              width: colWidth
             })
           )
         }));
@@ -163,6 +164,7 @@ async function exportDOCX(model, config = {}) {
 
       children.push(new Table({
         width: { size: 100, type: WidthType.PERCENTAGE },
+        columnWidths: Array(colCount).fill(colWidth),
         rows: tableRows
       }));
     } else {
@@ -192,7 +194,7 @@ async function exportDOCX(model, config = {}) {
     children.push(new Paragraph({ spacing: { after: SPACING.paragraph }, children: [] }));
   }
 
-  /* ── Assemble ─────────────────────────────────────────── */
+  /* ── Footer / Page Numbers ──────────────────── */
   const footers = {};
   if (cfg.includePageNumbers !== false) {
     footers.default = new Footer({

@@ -3,18 +3,40 @@ import React, { useState, useRef, useEffect } from "react";
 import { downloadExport } from "../../utils/export-utils";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
+import ReconcileConsentModal from "../Reconcile/ReconcileConsentModal";
+import AddToWorkspaceModal from "../Reconcile/AddToWorkspaceModal";
+import ReconcileWorkspaceModal from "../Reconcile/ReconcileWorkspaceModal";
 
 const EXPORT_FORMATS = [
   { key: "pdf", label: "PDF" },
   { key: "docx", label: "Word (.docx)" },
   { key: "xlsx", label: "Excel (.xlsx)" },
   { key: "json", label: "JSON" },
+  { key: "reconcile", label: "🔄 Reconcile" },
 ];
+
+function extractReconcileFields(result) {
+  if (!result?.segments) return {};
+  const fields = {};
+  result.segments.forEach((seg) => {
+    (seg.fields || []).forEach((f) => {
+      const key = String(f.label).toLowerCase().replace(/\s+/g, "_");
+      fields[key] = f.value;
+    });
+  });
+  if (result.metadata) Object.assign(fields, result.metadata);
+  return fields;
+}
 
 export default function ExportAllButton({ items, config = {} }) {
   const [open, setOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const menuRef = useRef(null);
+
+  const [showConsent, setShowConsent] = useState(false);
+  const [showWorkspacePicker, setShowWorkspacePicker] = useState(false);
+  const [showWorkspace, setShowWorkspace] = useState(false);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState(null);
 
   useEffect(() => {
     function handleClick(e) {
@@ -30,9 +52,31 @@ export default function ExportAllButton({ items, config = {} }) {
     (item) => item.result && !item.error && item.result.segments?.length > 0
   );
 
+  const docsForReconcile = successfulItems.map((item) => ({
+    document_name: item.name,
+    extracted_fields: extractReconcileFields(item.result),
+  }));
+
+  const handleConsentGranted = () => {
+    setShowConsent(false);
+    setShowWorkspacePicker(true);
+  };
+
+  const handleDocumentsAdded = (workspaceId) => {
+    setShowWorkspacePicker(false);
+    setActiveWorkspaceId(workspaceId);
+    setShowWorkspace(true);
+  };
+
   const handleExportAll = async (format) => {
     setExporting(true);
     setOpen(false);
+
+    if (format === "reconcile") {
+      setShowConsent(true);
+      setExporting(false);
+      return;
+    }
 
     if (successfulItems.length === 0) {
       alert("No successfully extracted documents to export.");
@@ -127,6 +171,26 @@ export default function ExportAllButton({ items, config = {} }) {
             </button>
           ))}
         </div>
+      )}
+
+      {showConsent && (
+        <ReconcileConsentModal
+          onClose={() => setShowConsent(false)}
+          onGranted={handleConsentGranted}
+        />
+      )}
+      {showWorkspacePicker && (
+        <AddToWorkspaceModal
+          documents={docsForReconcile}
+          onClose={() => setShowWorkspacePicker(false)}
+          onAdded={handleDocumentsAdded}
+        />
+      )}
+      {showWorkspace && activeWorkspaceId && (
+        <ReconcileWorkspaceModal
+          workspaceId={activeWorkspaceId}
+          onClose={() => setShowWorkspace(false)}
+        />
       )}
     </div>
   );

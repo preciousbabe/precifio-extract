@@ -758,15 +758,18 @@
   }
 
   .submenu {
-    position: fixed;
-    top: auto;
-    right: 16px;
-    left: 16px;
-    bottom: auto;
-    width: auto;
-    max-height: 60vh;
-    overflow-y: auto;
-  }
+  position: relative;   /* was: fixed — kills the z-index clash */
+  top: auto;
+  right: auto;          /* was: 16px */
+  left: auto;           /* was: 16px */
+  bottom: auto;
+  width: 100%;          /* was: auto */
+  max-height: 60vh;
+  overflow-y: auto;
+  margin-top: 8px;      /* keep breathing room like desktop */
+  box-shadow: none;     /* inherit clean inline look */
+  z-index: auto;        /* drop the 9999999 arms race */
+}
 }
 
 @media (max-width: 480px) {

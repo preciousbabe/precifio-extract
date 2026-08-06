@@ -12,6 +12,9 @@ import {
   sendEmail,
   copyToClipboard
 } from "../../utils/export-utils";
+import ReconcileConsentModal from "../Reconcile/ReconcileConsentModal";
+import AddToWorkspaceModal from "../Reconcile/AddToWorkspaceModal";
+import ReconcileWorkspaceModal from "../Reconcile/ReconcileWorkspaceModal";
 
 import "./QueueViewer.css";
 
@@ -288,7 +291,7 @@ function KVRow({
       </div>
       <div className="queue-kv-value">
         {isEditing ? (
-                    <input
+          <input
             className="queue-edit-input"
             value={
               typeof value === "object" && value !== null
@@ -392,8 +395,8 @@ function DataTable({ fields, isEditing, segmentIndex, setSegments, dirtyFields, 
 
                   return (
                     <td key={col} className={[
-                      "table-td", 
-                      isMoney || isNum ? "text-right" : "", 
+                      "table-td",
+                      isMoney || isNum ? "text-right" : "",
                       isMoney ? "money-cell" : "",
                       isDirty ? "table-td--dirty" : ""
                     ].filter(Boolean).join(" ")}>
@@ -424,7 +427,6 @@ function DataTable({ fields, isEditing, segmentIndex, setSegments, dirtyFields, 
 function renderValue(value) {
   if (value === null || value === undefined) return "—";
 
-  // Belt-and-suspenders: never render { value: "x" } as a table with "Value" label
   if (typeof value === "object" && !Array.isArray(value)) {
     const keys = Object.keys(value);
     if (keys.length === 1 && keys[0] === "value") {
@@ -450,18 +452,17 @@ function renderValue(value) {
     );
   }
 
-   if (typeof value === "object") {
+  if (typeof value === "object") {
     const keys = Object.keys(value);
     if (keys.length === 1 && keys[0] === "value") {
       return renderValue(value.value);
     }
 
-    // Flatten to readable string — aligns with export format exactly
     return Object.entries(value)
       .map(([k, v]) => `${formatLabel(k)}: ${renderValue(v)}`)
       .join(" | ");
   }
-  
+
   return String(value);
 }
 
@@ -474,6 +475,11 @@ function ExportDropdown({ item, segments, onExport, user, disabled, config }) {
   const DEFAULT_UPLOAD_FORMAT = "pdf";
   const menuRef = useRef(null);
 
+  const [showConsent, setShowConsent] = useState(false);
+  const [showPicker, setShowPicker] = useState(false);
+  const [showWs, setShowWs] = useState(false);
+  const [wsId, setWsId] = useState(null);
+
   useEffect(() => {
     function handleClick(e) {
       if (menuRef.current && !menuRef.current.contains(e.target)) {
@@ -484,6 +490,24 @@ function ExportDropdown({ item, segments, onExport, user, disabled, config }) {
     if (open) document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, [open]);
+
+  const handleConsentOk = () => { setShowConsent(false); setShowPicker(true); };
+  const handleAdded = (id) => { setShowPicker(false); setWsId(id); setShowWs(true); };
+
+  const reconcileDoc = {
+    document_name: item.name,
+    extracted_fields: (() => {
+      const fields = {};
+      segments.forEach((seg) => {
+        (seg.fields || []).forEach((f) => {
+          const key = String(f.label).toLowerCase().replace(/\s+/g, "_");
+          fields[key] = f.value;
+        });
+      });
+      if (item.result?.metadata) Object.assign(fields, item.result.metadata);
+      return fields;
+    })(),
+  };
 
   const handleExport = async (format) => {
     if (disabled) return;
@@ -510,6 +534,9 @@ function ExportDropdown({ item, segments, onExport, user, disabled, config }) {
           await downloadExport({ payload, format: "docx", config });
           break;
 
+        case "onedrive":
+        case "dropbox":
+        case "googledrive":
           if (!user) {
             alert("Please sign in to use integrations.");
             setExporting(null);
@@ -556,6 +583,11 @@ function ExportDropdown({ item, segments, onExport, user, disabled, config }) {
           setTimeout(() => setCopied(false), 2000);
           break;
 
+        case "reconcile":
+          setShowConsent(true);
+          setOpen(false);
+          break;
+
         default:
           console.warn("Unknown export format:", format);
           break;
@@ -567,8 +599,10 @@ function ExportDropdown({ item, segments, onExport, user, disabled, config }) {
       alert(err.message || "Export failed.");
     } finally {
       setExporting(null);
-      setOpen(false);
-      setSubmenu(null);
+      if (format !== "reconcile") {
+        setOpen(false);
+        setSubmenu(null);
+      }
     }
   };
 
@@ -653,7 +687,23 @@ function ExportDropdown({ item, segments, onExport, user, disabled, config }) {
             {copied ? <IconCheck /> : <IconCopy />}
             {copied ? "Copied to clipboard" : "Copy to clipboard"}
           </button>
+
+          <div className="export-divider" />
+          <div className="export-header">Reconcile</div>
+          <button className="export-option" onClick={() => handleExport("reconcile")}>
+            <span>🔄</span> Reconcile
+          </button>
         </div>
+      )}
+
+      {showConsent && (
+        <ReconcileConsentModal onClose={() => setShowConsent(false)} onGranted={handleConsentOk} />
+      )}
+      {showPicker && (
+        <AddToWorkspaceModal documents={[reconcileDoc]} onClose={() => setShowPicker(false)} onAdded={handleAdded} />
+      )}
+      {showWs && wsId && (
+        <ReconcileWorkspaceModal workspaceId={wsId} onClose={() => setShowWs(false)} />
       )}
     </div>
   );
@@ -690,7 +740,6 @@ export default function QueueViewer({ item, onClose, onExport, exportConfig = {}
   const [dirtyFields, setDirtyFields] = useState({});
   const hasChanges = Object.keys(dirtyFields).length > 0;
 
-  // Determine which segments to display
   const displaySegments = (isEditing && showOriginal)
     ? extraction.originalSegments ?? segments
     : segments;
@@ -722,7 +771,7 @@ export default function QueueViewer({ item, onClose, onExport, exportConfig = {}
       alert("Please sign in to save corrections.");
       return;
     }
-      setIsSaving(true);
+    setIsSaving(true);
     try {
       const token = localStorage.getItem('precifio_token');
       if (!token) {
@@ -903,9 +952,9 @@ export default function QueueViewer({ item, onClose, onExport, exportConfig = {}
           </div>
 
           <div className="export-actions">
-                        {hasChanges && (
-              <button 
-                className="save-review-btn" 
+            {hasChanges && (
+              <button
+                className="save-review-btn"
                 onClick={handleSaveChanges}
                 disabled={isSaving}
               >

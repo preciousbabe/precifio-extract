@@ -20,6 +20,11 @@
   to = "/privacy.html"
   status = 200
 
+  [[redirects]]
+  from = "/reconcile-guide" 
+  to = "/reconcile-guide.html" 
+  status = 200
+
 [[redirects]]
   from = "/support"
   to = "/support.html"

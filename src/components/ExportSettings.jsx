@@ -1,3 +1,5 @@
+// src/components/ExportSettings.jsx
+
 import React, { useState, useEffect } from "react";
 
 const STORAGE_KEY = "precifio_export_settings";

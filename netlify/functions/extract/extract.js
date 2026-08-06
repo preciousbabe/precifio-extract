@@ -60,7 +60,7 @@ function estimateCreditCost(text, fileName = '') {
   const numberDensity = charCount > 0 ? (text.match(/\d/g) || []).length / charCount : 0;
   if (numberDensity > 0.15) estimated *= 1.3;
 
-  return Math.ceil(estimated * 2) / 2; // round to nearest 0.5
+  return Math.ceil(estimated * 2) / 2;
 }
 
 function calculateActualCost(documentType, textLength = 0) {
@@ -71,7 +71,6 @@ function calculateActualCost(documentType, textLength = 0) {
     generic: 1.0
   };
   const rate = rates[documentType] || rates.generic;
-  // Token proxy: 1 token ≈ 4 chars
   const tokenCost = (textLength / 4 / 1000) * 0.5;
   return Math.round(Math.max(rate, Math.min(tokenCost, rate * 1.5)) * 10) / 10;
 }
@@ -101,7 +100,6 @@ function applyCorrections(extractedData, corrections) {
       }
     });
 
-    // Remove deleted fields before normalization runs
     seg.fields = (seg.fields || []).filter((f) => !f._deleted);
   });
 
@@ -130,12 +128,10 @@ exports.handler = async (event, context) => {
     };
   }
 
-    let transactionId = null;
-    let newBalance = null;
+  let transactionId = null;
+  let newBalance = null;
 
-  
   try {
-    const extractionId = crypto.randomUUID();
     const parsed = parseMultipart(event);
     const file = parsed.files[0];
 
@@ -188,9 +184,7 @@ exports.handler = async (event, context) => {
       }
     }
 
-    
-    
-        // ── Idempotency key: file hash + user/guest ──
+    // ── Idempotency key: file hash + user/guest ──
     const idempotencyKey = crypto
       .createHash('sha256')
       .update(file.buffer.toString('base64').slice(0, 8000) + (userId || guestId || 'guest'))
@@ -207,17 +201,13 @@ exports.handler = async (event, context) => {
       .maybeSingle();
 
     if (cachedJob?.status === 'completed' && cachedJob.raw_result) {
-      // Fast path: skip AI entirely
       const extractedData = cachedJob.raw_result;
       const docType = (extractedData.document_type || extractedData.category || 'generic').toString().toLowerCase().trim();
       
       let rawSegments = normalizeSegments(Array.isArray(extractedData.segments) ? extractedData.segments : []);
       const originalSegments = JSON.parse(JSON.stringify(rawSegments));
       
-      // Note: skip pattern re-apply on cache hit to avoid needing documentFingerprint here
-      // (Patterns were already applied when the job first completed)
-
-            let currentBalance = null;
+      let currentBalance = null;
       if (!isGuest && userId) {
         const { data: profile } = await supabase
           .from("profiles")
@@ -227,7 +217,6 @@ exports.handler = async (event, context) => {
         currentBalance = profile?.credits_remaining ?? null;
       }
 
-       // Only charge guest when they actually receive a result
       if (isGuest && guestId) {
         await supabase
           .from("guest_extractions")
@@ -252,14 +241,14 @@ exports.handler = async (event, context) => {
           metadata: {
             patternVersion: 1,
             processedAt: new Date().toISOString(),
-                      extraction: {
-            finalMethod: 'cached',
-            textLength: 0,
-            wordCount: 0,
-            estimatedPages: cachedJob.estimated_cost,
-          },
+            extraction: {
+              finalMethod: 'cached',
+              textLength: 0,
+              wordCount: 0,
+              estimatedPages: cachedJob.estimated_cost,
+            },
             creditsUsed: isGuest ? 0 : cachedJob.actual_cost,
-           newBalance: isGuest ? null : currentBalance,
+            newBalance: isGuest ? null : currentBalance,
           },
         }),
       };
@@ -279,10 +268,11 @@ exports.handler = async (event, context) => {
         }),
       };
     }
-    // ──────────────────────────────────────────────
 
+    // If we have a stale/failed job, reuse its ID so we never litter the DB with duplicates
+    let extractionId = cachedJob?.id || crypto.randomUUID();
 
-           // Guest tracking with IP rate limit
+    // Guest tracking with IP rate limit
     if (isGuest) {
       if (!guestId) {
         return {
@@ -300,7 +290,6 @@ exports.handler = async (event, context) => {
                        event.headers['x-forwarded-for']?.split(',')[0]?.trim() || 
                        'unknown';
 
-      // Hard limit: 3 per IP ever
       const { data: ipCheck } = await supabase
         .from("guest_extractions")
         .select("extraction_count")
@@ -354,7 +343,6 @@ exports.handler = async (event, context) => {
         };
       }
 
-            // Ensure record exists with count 0, but don't charge yet
       if (!guestRecord) {
         await supabase.from("guest_extractions").insert({
           guest_id: guestId,
@@ -372,15 +360,15 @@ exports.handler = async (event, context) => {
     let extractionMethod = extraction.metadata.method;
     const cleanedText = cleanOCR(finalText || "");
    
-  const fingerprintSource = cleanedText
-  .toLowerCase()
-  .replace(/\s+/g, " ")
-  .trim();
+    const fingerprintSource = cleanedText
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .trim();
 
-  const documentFingerprint = crypto
-  .createHash("sha256")
-  .update(fingerprintSource.substring(0, 5000))
-  .digest("hex");
+    const documentFingerprint = crypto
+      .createHash("sha256")
+      .update(fingerprintSource.substring(0, 5000))
+      .digest("hex");
 
     if (!cleanedText || cleanedText.length < 10) {
       return {
@@ -396,27 +384,66 @@ exports.handler = async (event, context) => {
       };
     }
 
-
     const cost = estimateCreditCost(cleanedText, file.name);
 
-            // ── Create extraction job record BEFORE slow AI call ──
-      const { data: jobRecord } = await supabase.from('extractions').insert({
-      id: extractionId,
-      idempotency_key: idempotencyKey,
-      user_id: userId || null,
-      guest_id: isGuest ? guestId : null,
-      document_type: 'unknown',
-      file_name: file.name,
-      estimated_cost: cost,
-      actual_cost: 0,
-      tokens_approx: Math.ceil(cleanedText.length / 4),
-      status: 'processing',
-      ocr_text: cleanedText.substring(0, 5000), // truncated for storage
-      created_at: new Date().toISOString()
-    }).select('id').single();
-    // ────────────────────────────────────────────────────
+    // ── Credit check (read-only, fail fast) ──
+    let currentBalance = null;
+    if (!isGuest && userId) {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("credits_remaining")
+        .eq("id", userId)
+        .single();
 
-        // ── Credit expiration: bonus credits die after 90 days ──
+      currentBalance = profile ? profile.credits_remaining : 0;
+      if (currentBalance < cost) {
+        return {
+          statusCode: 402,
+          headers,
+          body: JSON.stringify({
+            error: "Insufficient credits",
+            code: "INSUFFICIENT_CREDITS",
+            required: cost,
+            available: currentBalance,
+            isGuest: false,
+            message: `This document costs ${cost} credit${cost > 1 ? "s" : ""}. You have ${currentBalance} remaining.`,
+          }),
+        };
+      }
+    }
+
+    // ── Upsert job record (insert new OR reset stale row) ──
+    if (cachedJob?.id) {
+      await supabase.from('extractions').update({
+        status: 'processing',
+        document_type: 'unknown',
+        file_name: file.name,
+        estimated_cost: cost,
+        actual_cost: 0,
+        tokens_approx: Math.ceil(cleanedText.length / 4),
+        ocr_text: cleanedText.substring(0, 5000),
+        error_message: null,
+        raw_result: null,
+        updated_at: new Date().toISOString(),
+      }).eq('id', extractionId);
+    } else {
+      await supabase.from('extractions').insert({
+        id: extractionId,
+        idempotency_key: idempotencyKey,
+        user_id: userId || null,
+        guest_id: isGuest ? guestId : null,
+        document_type: 'unknown',
+        file_name: file.name,
+        estimated_cost: cost,
+        actual_cost: 0,
+        tokens_approx: Math.ceil(cleanedText.length / 4),
+        status: 'processing',
+        ocr_text: cleanedText.substring(0, 5000),
+        created_at: new Date().toISOString(),
+      });
+    }
+
+    // ── Credit expiration: bonus credits die after 90 days ──
     if (!isGuest && userId) {
       const { data: userProfile } = await supabase
         .from("profiles")
@@ -433,7 +460,6 @@ exports.handler = async (event, context) => {
 
       const accountAgeDays = (Date.now() - new Date(userProfile.created_at).getTime()) / (1000 * 60 * 60 * 24);
 
-      // If never purchased and account > 90 days old, bonus credits are dead
       if (!hasPurchased?.length && accountAgeDays > 90 && userProfile.credits_remaining > 0) {
         await supabase
           .from("profiles")
@@ -460,188 +486,103 @@ exports.handler = async (event, context) => {
         };
       }
     }
-    // ────────────────────────────────────────────────────────
-
-    // Credit check & deduction
-    if (!isGuest && userId) {
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("credits_remaining")
-        .eq("id", userId)
-        .single();
-
-      const currentCredits = profile ? profile.credits_remaining : 0;
-
-      if (currentCredits < cost) {
-        return {
-          statusCode: 402,
-          headers,
-          body: JSON.stringify({
-            error: "Insufficient credits",
-            code: "INSUFFICIENT_CREDITS",
-            required: cost,
-            available: currentCredits,
-            isGuest: false,
-            message: `This document costs ${cost} credit${cost > 1 ? "s" : ""}. You have ${currentCredits} remaining.`,
-          }),
-        };
-      }
-
-      newBalance = currentCredits - cost;
-      await supabase.from("profiles").update({ credits_remaining: newBalance }).eq("id", userId);
-
-      const { data: txData, error: txError } = await supabase
-        .from("credit_transactions")
-        .insert({
-          user_id: userId,
-          amount: -cost,
-          type: "extraction",
-          balance_after: newBalance,
-          status: "pending",
-          metadata: {
-            file_name: file.name,
-            pages: cost,
-            words: cleanedText.split(/\s+/).filter((w) => w.length > 0).length,
-            model: config.ai.provider,
-            chars: cleanedText.length,
-          },
-        })
-        .select("id")
-        .single();
-
-      if (txError) {
-        console.error("Failed to log extraction transaction:", txError);
-      } else {
-        transactionId = txData?.id;
-      }
-
-      console.log(`Reserved ${cost} credits from user ${userId}. Balance: ${newBalance}`);
-    }
-
-
-    let savedPattern = null;
-let patternApplied = false;
-
-if (!isGuest && userId) {
-  const { data: patterns } = await supabase
-    .from("extraction_patterns")
-    .select("*")
-    .eq("user_id", userId)
-    .eq("document_fingerprint", documentFingerprint)
-    .order("last_used_at", { ascending: false })
-    .limit(1);
-
-  if (patterns && patterns.length > 0) {
-    savedPattern = patterns[0];
-    patternApplied = true;
-    
-    // Update usage stats
-    await supabase
-      .from("extraction_patterns")
-      .update({ 
-        usage_count: patterns[0].usage_count + 1,
-        last_used_at: new Date().toISOString()
-      })
-      .eq("id", patterns[0].id);
-  }
-}
 
     // AI extraction
     let extractedData;
     let docType = 'generic';
-    let actualCost = cost; 
+    let actualCost = cost;
 
     try {
       const aiClient = new AIClient();
       extractedData = await aiClient.extract(cleanedText);
 
-          // ── Credit true-up after successful extraction ──
+      // ── Credit true-up after successful extraction ──
       docType = (extractedData.document_type || extractedData.category || 'generic').toString().toLowerCase().trim();
-    actualCost = calculateActualCost(docType, cleanedText.length);
-    const refundAmount = Math.round((cost - actualCost) * 10) / 10;
+      actualCost = calculateActualCost(docType, cleanedText.length);
 
-    
-    // Refund difference if we over-estimated (generosity mechanic)
-    if (!isGuest && userId && refundAmount > 0) {
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("credits_remaining")
-        .eq("id", userId)
-        .single();
-
-      const refundedBalance = (profile?.credits_remaining || 0) + refundAmount;
-      await supabase.from("profiles").update({ credits_remaining: refundedBalance }).eq("id", userId);
-
-      await supabase.from("credit_transactions").insert({
-        user_id: userId,
-        amount: refundAmount,
-        type: "refund",
-        balance_after: refundedBalance,
-        status: "completed",
-        metadata: {
-          reason: "actual_cost_lower_than_estimate",
-          estimated: cost,
-          actual: actualCost,
-          file_name: file.name,
-          document_type: docType,
-        },
-      });
-
-      newBalance = refundedBalance;
-    }
-
-      
-    // ── Save raw result IMMEDIATELY (before Netlify can timeout) ──
-    await supabase.from('extractions').update({
-      status: 'completed',
-      raw_result: extractedData,
-      document_type: (extractedData.document_type || extractedData.category || 'generic').toString().toLowerCase().trim(),
-      actual_cost: actualCost,
-    }).eq('id', extractionId);
-    // ─────────────────────────────────────────────────────────────
-
-     } catch (aiError) {
+      // Deduct actual cost (not the estimate) only after success
       if (!isGuest && userId) {
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("credits_remaining")
-          .eq("id", userId)
+        newBalance = currentBalance - actualCost;
+        await supabase.from("profiles").update({ credits_remaining: newBalance }).eq("id", userId);
+
+        const { data: txData, error: txError } = await supabase
+          .from("credit_transactions")
+          .insert({
+            user_id: userId,
+            amount: -actualCost,
+            type: "extraction",
+            balance_after: newBalance,
+            status: "completed",
+            metadata: {
+              file_name: file.name,
+              estimated_cost: cost,
+              actual_cost: actualCost,
+              document_type: docType,
+              words: cleanedText.split(/\s+/).filter((w) => w.length > 0).length,
+              model: config.ai.provider,
+              chars: cleanedText.length,
+            },
+          })
+          .select("id")
           .single();
 
-        const refundedBalance = (profile?.credits_remaining || 0) + cost;
-        await supabase.from("profiles").update({ credits_remaining: refundedBalance }).eq("id", userId);
-
-        await supabase.from("credit_transactions").insert({
-          user_id: userId,
-          amount: cost,
-          type: "refund",
-          balance_after: refundedBalance,
-          status: "completed",
-          metadata: {
-            file_name: file.name,
-            pages: cost,
-            reason: "ai_extraction_failed",
-            error: aiError.message,
-          },
-        });
-
-                if (transactionId) {
-          await supabase.from("credit_transactions").update({ status: "failed" }).eq("id", transactionId);
+        if (txError) {
+          console.error("Failed to log extraction transaction:", txError);
+        } else {
+          transactionId = txData?.id;
         }
 
-                // ── Mark extraction as failed ──
-                try {
-          await supabase.from('extractions').update({
-            status: 'failed',
-            error_message: aiError.message,
-            actual_cost: 0,
-          }).eq('id', extractionId);
-        } catch (e) {
-          // Silent fail — don't block the refund response
-        }
-        // ───────────────────────────────
+        // Refund difference if we over-estimated
+        const refundAmount = Math.round((cost - actualCost) * 10) / 10;
+        if (refundAmount > 0) {
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("credits_remaining")
+            .eq("id", userId)
+            .single();
 
-        console.log(`Refunded ${cost} credits to user ${userId} due to AI error. Balance: ${refundedBalance}`);
+          const refundedBalance = (profile?.credits_remaining || 0) + refundAmount;
+          await supabase.from("profiles").update({ credits_remaining: refundedBalance }).eq("id", userId);
+
+          await supabase.from("credit_transactions").insert({
+            user_id: userId,
+            amount: refundAmount,
+            type: "refund",
+            balance_after: refundedBalance,
+            status: "completed",
+            metadata: {
+              reason: "actual_cost_lower_than_estimate",
+              estimated: cost,
+              actual: actualCost,
+              file_name: file.name,
+              document_type: docType,
+            },
+          });
+
+          newBalance = refundedBalance;
+        }
+
+        console.log(`Charged ${actualCost} credits from user ${userId}. Balance: ${newBalance}`);
+      }
+
+      // ── Save raw result IMMEDIATELY ──
+      await supabase.from('extractions').update({
+        status: 'completed',
+        raw_result: extractedData,
+        document_type: docType,
+        actual_cost: actualCost,
+      }).eq('id', extractionId);
+
+    } catch (aiError) {
+      // Mark extraction as failed — credits were NEVER deducted, so nothing to refund
+      try {
+        await supabase.from('extractions').update({
+          status: 'failed',
+          error_message: aiError.message,
+          actual_cost: 0,
+        }).eq('id', extractionId);
+      } catch (e) {
+        // Silent fail — don't block the error response
       }
 
       return {
@@ -650,20 +591,45 @@ if (!isGuest && userId) {
         body: JSON.stringify({
           error: "AI extraction failed",
           message: aiError.message,
-          refunded: !isGuest,
+          refunded: false,
         }),
       };
     }
 
-
-
-        // 1. Normalize the RAW AI output FIRST (before any corrections)
+    // 1. Normalize the RAW AI output FIRST
     const rawSegments = normalizeSegments(Array.isArray(extractedData.segments) ? extractedData.segments : []);
     const originalSegments = JSON.parse(JSON.stringify(rawSegments));
 
-        // ── Fallback: exact fingerprint missed → try document type ──
+    // ── Saved pattern matching ──
+    let savedPattern = null;
+    let patternApplied = false;
+
+    if (!isGuest && userId) {
+      const { data: patterns } = await supabase
+        .from("extraction_patterns")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("document_fingerprint", documentFingerprint)
+        .order("last_used_at", { ascending: false })
+        .limit(1);
+
+      if (patterns && patterns.length > 0) {
+        savedPattern = patterns[0];
+        patternApplied = true;
+        
+        await supabase
+          .from("extraction_patterns")
+          .update({ 
+            usage_count: patterns[0].usage_count + 1,
+            last_used_at: new Date().toISOString()
+          })
+          .eq("id", patterns[0].id);
+      }
+    }
+
+    // ── Fallback: exact fingerprint missed → try document type ──
     if (!isGuest && userId && !savedPattern) {
-      const docType = (extractedData.document_type || extractedData.category || "unknown")
+      const docTypeLookup = (extractedData.document_type || extractedData.category || "unknown")
         .toString()
         .toLowerCase()
         .trim();
@@ -672,7 +638,7 @@ if (!isGuest && userId) {
         .from("extraction_patterns")
         .select("*")
         .eq("user_id", userId)
-        .eq("document_type", docType)
+        .eq("document_type", docTypeLookup)
         .order("last_used_at", { ascending: false })
         .limit(1);
 
@@ -697,29 +663,7 @@ if (!isGuest && userId) {
     }
     const segments = extractedData.segments;
 
-        if (!isGuest && userId && transactionId) {
-      const { error: updateError } = await supabase
-        .from("credit_transactions")
-        .update({
-          status: "completed",
-          metadata: {
-            file_name: file.name,
-            estimated_cost: cost,
-            actual_cost: actualCost,
-            document_type: docType,
-            words: cleanedText.split(/\s+/).filter((w) => w.length > 0).length,
-            model: config.ai.provider,
-            chars: cleanedText.length,
-          }
-        })
-        .eq("id", transactionId);
-
-      if (updateError) {
-        console.error("Failed to update transaction status:", updateError);
-      }
-    }
-
-        // Charge guest only after successful extraction
+    // Charge guest only after successful extraction
     if (isGuest && guestId) {
       await supabase
         .from("guest_extractions")
@@ -737,22 +681,14 @@ if (!isGuest && userId) {
         fileName: file.name,
         fileType: validation.mimeType,
         documentSummary: extractedData.document_summary,
-       documentType:
-     (
-       extractedData.document_type ||
-       extractedData.category ||
-       "unknown"
-     )
-     .toString()
-     .toLowerCase()
-     .trim(),
+        documentType: (extractedData.document_type || extractedData.category || "unknown").toString().toLowerCase().trim(),
         originalSegments,
         segments,
         savedPattern,
         metadata: {
           documentFingerprint,
-           patternVersion: 1,
-           processedAt: new Date().toISOString(),
+          patternVersion: 1,
+          processedAt: new Date().toISOString(),
           extraction: {
             ...extraction.metadata,
             finalMethod: extractionMethod,
@@ -761,7 +697,7 @@ if (!isGuest && userId) {
             wordCount: cleanedText.split(/\s+/).filter((w) => w.length > 0).length,
             estimatedPages: cost,
           },
-          creditsUsed: isGuest ? 0 : cost,
+          creditsUsed: isGuest ? 0 : actualCost,
           newBalance: isGuest ? null : newBalance,
         },
       }),
@@ -779,29 +715,19 @@ if (!isGuest && userId) {
   }
 };
 
-/**
- * Normalize segments so line items render as tables.
- * If a segment has fields where each value is an object with the same keys,
- * keep it as-is. If values are flat strings/numbers, leave them as primitives.
- */
 function normalizeSegments(segments) {
   return segments.map((seg) => {
     const fields = seg.fields || [];
-
-    // Detect line items: all values are objects with identical keys
     const objectFields = fields.filter(
       (f) => f.value && typeof f.value === "object" && !Array.isArray(f.value)
     );
 
     if (objectFields.length === fields.length && fields.length > 1) {
-      // Already structured as objects — perfect for table rendering
       return seg;
     }
 
-    // For flat string values, check if segment name suggests tabular data
     const tableKeywords = /line|item|product|entry|detail|row/i;
     if (tableKeywords.test(seg.segment_name) && fields.length > 1) {
-      // Try to parse each field value into structured object
       const normalizedFields = fields.map((f) => ({
         ...f,
         value: tryParseStructured(f.value, f.label),
@@ -809,11 +735,9 @@ function normalizeSegments(segments) {
       return { ...seg, fields: normalizedFields };
     }
 
-    // For non-tabular segments, unwrap { value: "string" } back to primitive
     const cleanedFields = fields.map((f) => {
       if (f.value && typeof f.value === "object" && !Array.isArray(f.value)) {
         const keys = Object.keys(f.value);
-        // If it's just { value: "something" }, unwrap it
         if (keys.length === 1 && keys[0] === "value") {
           return { ...f, value: f.value.value };
         }
@@ -825,10 +749,6 @@ function normalizeSegments(segments) {
   });
 }
 
-/**
- * Try to parse a flat string into a structured object.
- * Returns primitive if not structured, or object if structured.
- */
 function tryParseStructured(value, label) {
   if (value === null || value === undefined) return "";
   if (typeof value === "number") return value;
@@ -848,5 +768,5 @@ function tryParseStructured(value, label) {
     }
   }
 
-  return hasStructured ? obj : value; 
+  return hasStructured ? obj : value;
 }

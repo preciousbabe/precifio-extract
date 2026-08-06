@@ -5,6 +5,7 @@ import DocumentUploader from "./components/DocumentUploader";
 import DocumentQueue from "./components/Queue/DocumentQueue";
 import NetworkStatus from "./components/NetworkStatus";
 import AuthModal from "./components/AuthModal";
+import ReconcileHomeButton from "./components/Reconcile/ReconcileHomeButton";
 import { BuyCredits } from "./components/BuyCredits";
 import AdminDashboard from './components/AdminDashboard';
 import { useDocumentQueue } from "./hooks/useDocumentQueue";
@@ -119,6 +120,8 @@ useEffect(() => {
               >
                 Buy Credits
               </button>
+
+              <ReconcileHomeButton />
       
                  <button 
                 className="settings-btn" 
@@ -168,16 +171,16 @@ useEffect(() => {
             <h2 className="guest-headline">
                Turn invoices, receipts, bank statements and 30+ document types into structured data in seconds.
             </h2>
-            <p className="guest-subheadline">
+            {/* <p className="guest-subheadline">
               Snap a photo with your phone or drag & drop — PDF, JPG, PNG, and more supported
-            </p>
+            </p> */}
 
-            <div className="format-badges">
+            {/* <div className="format-badges">
               <span className="fmt-badge"><span className="fmt-dot pdf"/>PDF</span>
               <span className="fmt-badge"><span className="fmt-dot jpg"/>JPG</span>
               <span className="fmt-badge"><span className="fmt-dot png"/>PNG</span>
               <span className="fmt-badge"><span className="fmt-dot jpeg"/>JPEG</span>
-            </div>
+            </div> */}
 
             <div className="steps-strip">
               <div className="step">

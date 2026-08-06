@@ -11,73 +11,76 @@ function getGuestId() {
   return id;
 }
 
-function getAuthHeaders() {
-  const headers = {};
-  const token = localStorage.getItem('precifio_token');
-
-  if (token) {
-    headers['Authorization'] = 'Bearer ' + token;
-  } else {
-    headers['X-Guest-Id'] = getGuestId();
-  }
-
-  return headers;
-}
-
 async function uploadWithPoll(url, file, onProgress) {
   const MAX_RETRIES = 3;
   const POLL_INTERVAL = 3000;
-  const MAX_POLL_TIME = 60000;
+  const MAX_POLL_TIME = 120000;
+  const FETCH_TIMEOUT = 35000;
 
-  retryLoop: for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+  // ── SNAPSHOT AUTH STATE ONCE PER UPLOAD ──
+  const token = localStorage.getItem('precifio_token');
+  const authHeaders = token
+    ? { 'Authorization': 'Bearer ' + token }
+    : { 'X-Guest-Id': getGuestId() };
+
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+
     try {
-            const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 120000);
-
-      // ✅ Recreate FormData fresh every attempt
       const formData = new FormData();
       formData.append('file', file);
 
       const res = await fetch(url, {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: authHeaders,
         body: formData,
         signal: controller.signal
       });
       clearTimeout(timeoutId);
 
-      // 202 = processing, start polling
+      // ── 202 = accepted, start polling ──
       if (res.status === 202) {
         const { jobId } = await res.json();
+        if (!jobId) throw new Error('No jobId returned for polling.');
+
         onProgress?.({ stage: 'processing', progress: 50 });
 
+        const pollUrl = `${API_BASE}/check-job?jobId=${jobId}`;
         const startTime = Date.now();
+
         while (Date.now() - startTime < MAX_POLL_TIME) {
           await new Promise(r => setTimeout(r, POLL_INTERVAL));
-          
-          const pollRes = await fetch(`${API_BASE}/extract-poll?jobId=${jobId}`);
+
+          const pollRes = await fetch(pollUrl, { headers: authHeaders });
+
           if (pollRes.status === 200) {
-            onProgress?.({ stage: 'processing', progress: 85 });
-            // Job done — jump to next retryLoop iteration to re-POST /extract
-            // and hit the idempotency cache for the final 200 response
-            continue retryLoop;
+            const data = await pollRes.json();
+            if (data.status === 'completed') {
+              onProgress?.({ stage: 'processing', progress: 90 });
+              return data;
+            }
           }
+
           if (pollRes.status === 500) {
             const err = await pollRes.json();
-            throw new Error(err.error || 'Extraction failed');
+            throw new Error(err.error || err.message || 'Extraction failed');
           }
           // 202 = still processing, loop continues
         }
+
         throw new Error('Extraction timed out. Please try again.');
       }
 
-      // 200 = done (fresh or cached)
-      if (res.ok) return await res.json();
+      // ── 200 = immediate completion ──
+      if (res.ok) {
+        return await res.json();
+      }
 
-      // Error handling (402, 429, etc.)
+      // ── Error handling (402, 429, etc.) ──
       let data = {};
       try { data = await res.json(); } catch {}
-      
+
       const error = new Error(data.error || data.message || 'Extraction failed.');
       error.status = res.status;
       error.code = data.code || null;
@@ -87,13 +90,18 @@ async function uploadWithPoll(url, file, onProgress) {
       throw error;
 
     } catch (error) {
-      if (error.name === 'AbortError' || error.message?.includes('timeout')) {
-        if (attempt < MAX_RETRIES) {
-          onProgress?.({ stage: 'processing', progress: 40 });
-          await new Promise(r => setTimeout(r, 2000));
-          continue;
-        }
+      clearTimeout(timeoutId);
+
+      const isRetryable = error.name === 'AbortError' ||
+                          error.message?.includes('timeout') ||
+                          error.message?.includes('network');
+
+      if (isRetryable && attempt < MAX_RETRIES) {
+        onProgress?.({ stage: 'processing', progress: 40 });
+        await new Promise(r => setTimeout(r, 2000));
+        continue;
       }
+
       throw error;
     }
   }
@@ -111,7 +119,6 @@ class QueueManager {
     onProgress({ stage: 'saving', progress: 95 });
     onProgress({ stage: 'completed', progress: 100 });
 
-    // ✅ Emit event for real-time credit update
     if (result.success && result.metadata?.creditsUsed > 0 && result.metadata?.newBalance !== undefined) {
       window.dispatchEvent(new CustomEvent('creditsUpdated', {
         detail: { newBalance: result.metadata.newBalance }

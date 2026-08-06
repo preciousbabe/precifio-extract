@@ -16,8 +16,10 @@ function buildFileName(name, extension) {
 }
 
 function stripBrokenBar(value) {
-  if (typeof value === "string") return value.replace(/[¦|]/g, "");
-  return value;
+  if (typeof value !== "string") return value;
+  return value
+    .replace(/[¦|]/g, "")
+    .replace(/₦/g, "N");
 }
 
 function formatLabel(key) {
@@ -54,8 +56,18 @@ function toBuffer(value) {
 }
 
 function isTableSegment(segment = {}) {
+  const t = (segment.segment_type || "").toLowerCase();
+  if (t === "detail") return false;
+  if (t === "table") {
+    const fields = segment.fields || [];
+    return fields.length > 0 && fields.every(f => {
+      const v = f?.value;
+      return v && typeof v === "object" && !Array.isArray(v);
+    });
+  }
+
   const fields = segment.fields || [];
-  if (fields.length < 2) return false;
+  if (fields.length < 1) return false;
 
   const first = fields[0]?.value;
   if (!first || typeof first !== "object" || Array.isArray(first)) return false;
@@ -108,12 +120,8 @@ function normalizeModel(model = {}) {
   };
 }
 
-/**
- * Calculate proportional column widths for table rendering.
- * Used by PDF and can be adapted for Excel auto-width hints.
- */
 function calculateColumnWidths(columns, fields, availableWidth) {
-  const charWidth = 5.5;   // approx width per char at small font sizes
+  const charWidth = 5.5;
   const padding = 14;
   const minWidth = 45;
   const maxWidth = 300;

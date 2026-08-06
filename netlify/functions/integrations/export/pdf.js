@@ -1,8 +1,6 @@
-// integrations/export/pdf.js
-
 "use strict";
 
-const PDFDocument = require("pdfkit");
+const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
 const {
   normalizeModel,
   isTableSegment,
@@ -12,257 +10,312 @@ const {
   calculateColumnWidths
 } = require("./utils");
 
-const COLORS = {
-  primary:   "#1A365D",
-  secondary: "#2B6CB0",
-  text:      "#2D3748",
-  muted:     "#718096",
-  light:     "#E2E8F0",
-  bgHeader:  "EBF4FF",
-  bgAlt:     "#F7FAFC",
-  border:    "#CBD5E0"
-};
-
-const FONTS = {
-  heading:  "Helvetica-Bold",
-  body:     "Helvetica",
-  bodyBold: "Helvetica-Bold"
-};
-
-const MARGIN = 60;
-const BOTTOM_MARGIN = 60;
-const PAGE_WIDTH = 595.28;
+const PAGE_WIDTH  = 595.28;
 const PAGE_HEIGHT = 841.89;
+const MARGIN      = 60;
+const BOTTOM_MARGIN = 60;
+const CONTENT_TOP   = PAGE_HEIGHT - MARGIN;
+const CONTENT_BOTTOM = BOTTOM_MARGIN;
 
-function ensureSpace(doc, needed) {
-  if (doc.y + needed > PAGE_HEIGHT - BOTTOM_MARGIN) {
-    doc.addPage();
-    doc.y = MARGIN;
+// Pre-computed pdf-lib rgb() colors — no helper function, zero ambiguity
+const C = {
+  primary:   rgb(26/255, 54/255, 93/255),
+  secondary: rgb(43/255, 108/255, 176/255),
+  text:      rgb(45/255, 55/255, 72/255),
+  muted:     rgb(113/255, 128/255, 150/255),
+  light:     rgb(226/255, 232/255, 240/255),
+  bgHeader:  rgb(235/255, 244/255, 255/255),
+  bgAlt:     rgb(247/255, 250/255, 252/255),
+  border:    rgb(203/255, 213/255, 224/255),
+};
+
+function wrapText(text, font, size, maxWidth) {
+  const str = stripBrokenBar(String(text ?? ""));
+  if (!str) return [""];
+  const words = str.split(/\s+/);
+  const lines = [];
+  let current = "";
+  for (const word of words) {
+    const test = current ? current + " " + word : word;
+    if (font.widthOfTextAtSize(test, size) > maxWidth && current) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = test;
+    }
   }
+  if (current) lines.push(current);
+  return lines;
 }
+
+/* ─────────────────────────────────────────────── */
 
 async function exportPDF(model = {}, config = {}) {
   const docModel = normalizeModel(model);
   const cfg = {
-    branding: { companyName: "", showMetadata: true, primaryColor: COLORS.primary },
+    branding: { companyName: "", showMetadata: true, primaryColor: C.primary },
     includePageNumbers: true,
     ...config
   };
 
-  return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({
-      size: "A4",
-      margin: MARGIN,
-      info: {
-        Title: stripBrokenBar(docModel.fileName || "Document"),
-        Author: cfg.branding.companyName || "Document Export",
-        CreationDate: new Date()
-      },
-      bufferPages: true
-    });
+  const pdfDoc   = await PDFDocument.create();
+  const bodyFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
-    const buffers = [];
-    doc.on("data", chunk => buffers.push(chunk));
-    doc.on("end", () => {
-      const buffer = Buffer.concat(buffers);
-      resolve({
-        buffer,
-        mimeType: "application/pdf",
-        extension: "pdf",
-        fileName: `${stripBrokenBar(docModel.fileName || "document")}.pdf`
-      });
-    });
-    doc.on("error", reject);
+  const ctx = {
+    pdfDoc,
+    pages: [],
+    page: null,
+    y: 0,
+    bodyFont,
+    boldFont,
+    cfg
+  };
 
-    /* ── Top accent bar ─────────────────────────────────── */
-    doc.rect(0, 0, PAGE_WIDTH, 4).fill(COLORS.secondary);
-    doc.y = 24;
+  // First page
+  ctx.page = pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+  ctx.pages.push(ctx.page);
+  ctx.y = CONTENT_TOP;
 
-    /* ── Optional Brand / Metadata Header ───────────────── */
-    const metaY = doc.y;
-    const metaRight = PAGE_WIDTH - MARGIN;
-
-    if (cfg.branding.companyName) {
-      doc.font(FONTS.heading).fontSize(18).fillColor(cfg.branding.primaryColor || COLORS.primary);
-      doc.text(cfg.branding.companyName, MARGIN, metaY);
-      doc.y = metaY + 22;
-    }
-
-    if (cfg.branding.showMetadata !== false) {
-      const fileName = stripBrokenBar(docModel.fileName || "Untitled");
-      const dateStr = new Date(docModel.extractedAt).toLocaleDateString("en-US", {
-        year: "numeric", month: "long", day: "numeric",
-        hour: "2-digit", minute: "2-digit"
-      });
-
-      doc.font(FONTS.body).fontSize(9).fillColor(COLORS.muted);
-      const metaText = `${fileName}  ·  ${dateStr}`;
-      doc.text(metaText, MARGIN, cfg.branding.companyName ? doc.y : metaY + 4, {
-        align: cfg.branding.companyName ? "left" : "right",
-        width: cfg.branding.companyName ? undefined : metaRight - MARGIN
-      });
-
-      if (!cfg.branding.companyName) {
-        doc.y = metaY + 18;
-      } else {
-        doc.y += 4;
-      }
-    } else {
-      doc.y = metaY + (cfg.branding.companyName ? 8 : 0);
-    }
-
-    doc.moveTo(MARGIN, doc.y).lineTo(PAGE_WIDTH - MARGIN, doc.y).stroke(COLORS.light);
-    doc.y += 18;
-
-    /* ── Segments ───────────────────────────────────────── */
-    const segments = docModel.segments || [];
-
-    for (const segment of segments) {
-      const fields = segment.fields || [];
-      if (!fields.length) continue;
-
-      ensureSpace(doc, 40);
-
-      const segY = doc.y;
-      doc.rect(MARGIN, segY, 3, 16).fill(COLORS.secondary);
-      doc.font(FONTS.heading).fontSize(12).fillColor(COLORS.primary);
-      doc.text(stripBrokenBar(segment.segment_name || "Section"), MARGIN + 10, segY + 1);
-      doc.y = segY + 24;
-
-      if (isTableSegment(segment)) {
-        renderTable(doc, segment);
-      } else {
-        renderKeyValue(doc, segment);
-      }
-
-      doc.y += 14;
-    }
-
-    /* ── Footer / Page Numbers ──────────────────────────── */
-    const pageRange = doc.bufferedPageRange();
-    const totalPages = pageRange.count;
-
-    for (let i = 0; i < totalPages; i++) {
-      doc.switchToPage(i);
-      const footerY = PAGE_HEIGHT - 36;
-
-      if (cfg.includePageNumbers !== false) {
-        doc.font(FONTS.body).fontSize(8).fillColor(COLORS.muted);
-        // FIX: explicit width prevents overflow that was creating ghost pages
-        doc.text(
-          `Page ${i + 1} of ${totalPages}`,
-          MARGIN,
-          footerY,
-          { align: "right", width: PAGE_WIDTH - (MARGIN * 2) }
-        );
-      }
-
-      doc.rect(0, PAGE_HEIGHT - 4, PAGE_WIDTH, 4).fill(COLORS.secondary);
-    }
-
-    doc.end();
+  // Top accent bar
+  ctx.page.drawRectangle({
+    x: 0, y: PAGE_HEIGHT - 4, width: PAGE_WIDTH, height: 4, color: C.secondary
   });
+
+  drawHeader(ctx, docModel);
+
+  const segments = docModel.segments || [];
+  for (const segment of segments) {
+    if (!segment.fields?.length) continue;
+    drawSegment(ctx, segment);
+  }
+
+  // Footer on every page we actually created
+  const totalPages = ctx.pages.length;
+  ctx.pages.forEach((page, idx) => {
+    page.drawRectangle({
+      x: 0, y: 0, width: PAGE_WIDTH, height: 4, color: C.secondary
+    });
+
+    if (cfg.includePageNumbers !== false) {
+      const text = `Page ${idx + 1} of ${totalPages}`;
+      const tw   = bodyFont.widthOfTextAtSize(text, 8);
+      page.drawText(text, {
+        x: PAGE_WIDTH - MARGIN - tw,
+        y: 20,
+        size: 8,
+        font: bodyFont,
+        color: C.muted
+      });
+    }
+  });
+
+  const pdfBytes = await pdfDoc.save();
+  return {
+    buffer: Buffer.from(pdfBytes),
+    mimeType: "application/pdf",
+    extension: "pdf",
+    fileName: `${stripBrokenBar(docModel.fileName || "document")}.pdf`
+  };
 }
 
-/* ── Table Renderer ─────────────────────────────────────── */
+/* ── Header ───────────────────────────────────── */
 
-function renderTable(doc, segment) {
-  const fields = segment.fields || [];
-  const columns = Object.keys(fields[0].value || {});
-  const tableWidth = PAGE_WIDTH - (MARGIN * 2);
+function drawHeader(ctx, docModel) {
+  const { cfg, page, boldFont, bodyFont } = ctx;
+  let y = ctx.y;
 
-  const colWidths = calculateColumnWidths(columns, fields, tableWidth);
-  const rowCount = fields.length;
+  const metaText = `${stripBrokenBar(docModel.fileName || "Untitled")}  ·  ${new Date(docModel.extractedAt).toLocaleDateString("en-US", {
+    year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit"
+  })}`;
 
-  // Header
-  ensureSpace(doc, 28);
-  const headerY = doc.y;
-  doc.rect(MARGIN, headerY - 2, tableWidth, 22).fill(COLORS.bgHeader);
-
-  doc.font(FONTS.bodyBold).fontSize(8).fillColor(COLORS.primary);
-  let hx = MARGIN;
-  columns.forEach((col, i) => {
-    doc.text(formatLabel(col), hx + 4, headerY + 5, { width: colWidths[i] - 8 });
-    hx += colWidths[i];
-  });
-  doc.y = headerY + 24;
-
-  // Rows
-  for (let idx = 0; idx < rowCount; idx++) {
-    const field = fields[idx];
-    const row = field.value || {};
-
-    doc.font(FONTS.body).fontSize(8);
-    let maxH = 16;
-    columns.forEach((col, i) => {
-      const val = stripBrokenBar(String(row[col] ?? ""));
-      const h = doc.heightOfString(val, { width: colWidths[i] - 8 });
-      maxH = Math.max(maxH, h + 8);
+  if (cfg.branding.companyName) {
+    page.drawText(stripBrokenBar(cfg.branding.companyName), {
+      x: MARGIN, y, size: 18, font: boldFont, color: cfg.branding.primaryColor
     });
-    const rowHeight = Math.max(20, maxH);
+    y -= 24;
+    page.drawText(metaText, { x: MARGIN, y, size: 9, font: bodyFont, color: C.muted });
+    y -= 20;
+  } else {
+    const tw = bodyFont.widthOfTextAtSize(metaText, 9);
+    page.drawText(metaText, {
+      x: PAGE_WIDTH - MARGIN - tw, y, size: 9, font: bodyFont, color: C.muted
+    });
+    y -= 20;
+  }
 
-    ensureSpace(doc, rowHeight + 2);
+  page.drawLine({
+    start: { x: MARGIN, y: y + 6 },
+    end:   { x: PAGE_WIDTH - MARGIN, y: y + 6 },
+    thickness: 0.5,
+    color: C.light
+  });
+  y -= 10;
+  ctx.y = y;
+}
 
-    const rowY = doc.y;
+/* ── Page / Segment helpers ───────────────────── */
+
+function ensureSpace(ctx, needed) {
+  if (ctx.y - needed < CONTENT_BOTTOM) {
+    ctx.page = ctx.pdfDoc.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
+    ctx.pages.push(ctx.page);
+    ctx.y = CONTENT_TOP;
+  }
+}
+
+function drawSegment(ctx, segment) {
+  ensureSpace(ctx, 40);
+  const { page, boldFont } = ctx;
+  const title = stripBrokenBar(segment.segment_name || "Section");
+
+  page.drawRectangle({
+    x: MARGIN, y: ctx.y - 16, width: 3, height: 16, color: C.secondary
+  });
+
+  page.drawText(title, {
+    x: MARGIN + 10, y: ctx.y - 12, size: 12, font: boldFont, color: C.primary
+  });
+  ctx.y -= 28;
+
+  if (isTableSegment(segment)) {
+    drawTable(ctx, segment);
+  } else {
+    drawKeyValue(ctx, segment);
+  }
+  ctx.y -= 14;
+}
+
+/* ── Key-Value ────────────────────────────────── */
+
+function drawKeyValue(ctx, segment) {
+  const fields = segment.fields || [];
+  const labelWidth = 160;
+  const valueX     = MARGIN + labelWidth + 20;
+  const valueWidth = PAGE_WIDTH - MARGIN - valueX;
+  const lineHeight = 9 * 1.2;
+
+  for (let idx = 0; idx < fields.length; idx++) {
+    const label = stripBrokenBar(fields[idx].label || "");
+    const value = formatFieldValue(fields[idx].value);
+
+    const labelLines = wrapText(label, ctx.boldFont, 9, labelWidth);
+    const valueLines = wrapText(value, ctx.bodyFont, 9, valueWidth);
+    const blockH     = Math.max(labelLines.length, valueLines.length) * lineHeight + 10;
+
+    ensureSpace(ctx, blockH + 4);
+    const y = ctx.y;
+
     if (idx % 2 === 1) {
-      doc.rect(MARGIN, rowY - 1, tableWidth, rowHeight).fill(COLORS.bgAlt);
+      ctx.page.drawRectangle({
+        x: MARGIN, y: y - blockH + 2,
+        width: PAGE_WIDTH - MARGIN * 2, height: blockH,
+        color: C.bgAlt
+      });
     }
 
-    doc.moveTo(MARGIN, rowY + rowHeight - 1)
-       .lineTo(MARGIN + tableWidth, rowY + rowHeight - 1)
-       .stroke(COLORS.border);
+    labelLines.forEach((line, i) => {
+      ctx.page.drawText(line, {
+        x: MARGIN + 4, y: y - 4 - (i * lineHeight),
+        size: 9, font: ctx.boldFont, color: C.secondary
+      });
+    });
 
-    doc.font(FONTS.body).fontSize(8).fillColor(COLORS.text);
+    valueLines.forEach((line, i) => {
+      ctx.page.drawText(line, {
+        x: valueX, y: y - 4 - (i * lineHeight),
+        size: 9, font: ctx.bodyFont, color: C.text
+      });
+    });
+
+    ctx.y = y - blockH;
+    ctx.page.drawLine({
+      start: { x: MARGIN, y: ctx.y + 2 },
+      end:   { x: PAGE_WIDTH - MARGIN, y: ctx.y + 2 },
+      thickness: 0.5,
+      color: C.light
+    });
+  }
+}
+
+/* ── Table ────────────────────────────────────── */
+
+function drawTable(ctx, segment) {
+  const fields   = segment.fields || [];
+  const columns  = Object.keys(fields[0].value || {});
+  const tableW   = PAGE_WIDTH - (MARGIN * 2);
+  if (!columns.length) return;
+
+  const colWidths  = calculateColumnWidths(columns, fields, tableW);
+  const lineHeight = 8 * 1.2;
+  const hdrH       = 24;
+
+  ensureSpace(ctx, hdrH);
+  const hdrY = ctx.y;
+
+  ctx.page.drawRectangle({
+    x: MARGIN, y: hdrY - hdrH, width: tableW, height: hdrH, color: C.bgHeader
+  });
+
+  let hx = MARGIN;
+  columns.forEach((col, i) => {
+    ctx.page.drawText(formatLabel(col), {
+      x: hx + 4, y: hdrY - 16, size: 8, font: ctx.boldFont, color: C.primary
+    });
+    hx += colWidths[i];
+  });
+
+  ctx.page.drawLine({
+    start: { x: MARGIN, y: hdrY - hdrH },
+    end:   { x: MARGIN + tableW, y: hdrY - hdrH },
+    thickness: 1, color: C.secondary
+  });
+
+  ctx.y = hdrY - hdrH;
+
+  fields.forEach((field, idx) => {
+    const row = field.value || {};
+    let maxH = 20;
+    columns.forEach((col, i) => {
+      const text = stripBrokenBar(String(row[col] ?? ""));
+      const cw   = colWidths[i] - 8;
+      const lines = wrapText(text, ctx.bodyFont, 8, cw);
+      maxH = Math.max(maxH, lines.length * lineHeight + 8);
+    });
+
+    ensureSpace(ctx, maxH + 2);
+    const rowY = ctx.y;
+
+    if (idx % 2 === 1) {
+      ctx.page.drawRectangle({
+        x: MARGIN, y: rowY - maxH, width: tableW, height: maxH, color: C.bgAlt
+      });
+    }
+
+    ctx.page.drawLine({
+      start: { x: MARGIN, y: rowY - maxH },
+      end:   { x: MARGIN + tableW, y: rowY - maxH },
+      thickness: 0.5, color: C.border
+    });
+
     let cx = MARGIN;
     columns.forEach((col, i) => {
-      const val = stripBrokenBar(String(row[col] ?? ""));
-      doc.text(val, cx + 4, rowY + 4, { width: colWidths[i] - 8 });
+      const text  = stripBrokenBar(String(row[col] ?? ""));
+      const cw    = colWidths[i] - 8;
+      const lines = wrapText(text, ctx.bodyFont, 8, cw);
+      lines.forEach((line, li) => {
+        ctx.page.drawText(line, {
+          x: cx + 4, y: rowY - 8 - (li * lineHeight),
+          size: 8, font: ctx.bodyFont, color: C.text
+        });
+      });
       cx += colWidths[i];
     });
 
-    doc.y = rowY + rowHeight;
-  }
+    ctx.y = rowY - maxH;
+  });
 
-  doc.y += 6;
-}
-
-/* ── Key-Value Renderer ─────────────────────────────── */
-
-function renderKeyValue(doc, segment) {
-  const fields = segment.fields || [];
-  const labelWidth = 160;
-  const valueX = MARGIN + labelWidth + 20;
-  const valueWidth = PAGE_WIDTH - MARGIN - valueX;
-
-  for (let idx = 0; idx < fields.length; idx++) {
-    const field = fields[idx];
-    const label = stripBrokenBar(field.label || "");
-    const value = formatFieldValue(field.value);
-
-    doc.font(FONTS.bodyBold).fontSize(9);
-    const labelH = doc.heightOfString(label, { width: labelWidth });
-    doc.font(FONTS.body).fontSize(9);
-    const valueH = doc.heightOfString(value, { width: valueWidth });
-    const blockH = Math.max(labelH, valueH) + 10;
-
-    ensureSpace(doc, blockH + 4);
-
-    const y = doc.y;
-
-    if (idx % 2 === 1) {
-      doc.rect(MARGIN, y - 2, PAGE_WIDTH - MARGIN * 2, blockH).fill(COLORS.bgAlt);
-    }
-
-    doc.font(FONTS.bodyBold).fontSize(9).fillColor(COLORS.secondary);
-    doc.text(label, MARGIN + 4, y + 4, { width: labelWidth });
-
-    doc.font(FONTS.body).fontSize(9).fillColor(COLORS.text);
-    doc.text(value, valueX, y + 4, { width: valueWidth });
-
-    doc.y = y + blockH;
-    doc.moveTo(MARGIN, doc.y - 2).lineTo(PAGE_WIDTH - MARGIN, doc.y - 2).dash(1, { space: 2 }).stroke(COLORS.light);
-    doc.undash();
-  }
+  ctx.y -= 6;
 }
 
 module.exports = exportPDF;
