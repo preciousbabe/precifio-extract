@@ -12,7 +12,7 @@ const {
 
 const PAGE_WIDTH  = 595.28;
 const PAGE_HEIGHT = 841.89;
-const MARGIN      = 60;
+const MARGIN      = 70;
 const BOTTOM_MARGIN = 60;
 const CONTENT_TOP   = PAGE_HEIGHT - MARGIN;
 const CONTENT_BOTTOM = BOTTOM_MARGIN;
@@ -48,15 +48,31 @@ function wrapText(text, font, size, maxWidth) {
   return lines;
 }
 
+function normalizeColor(input) {
+  if (!input) return C.primary;
+  if (typeof input === "string") {
+    const hex = input.replace(/^#/, "");
+    if (hex.length === 6) {
+      const bigint = parseInt(hex, 16);
+      const r = (bigint >> 16) & 255;
+      const g = (bigint >> 8) & 255;
+      const b = bigint & 255;
+      return rgb(r / 255, g / 255, b / 255);
+    }
+  }
+  return input;
+}
+
 /* ─────────────────────────────────────────────── */
 
 async function exportPDF(model = {}, config = {}) {
   const docModel = normalizeModel(model);
-  const cfg = {
+    const cfg = {
     branding: { companyName: "", showMetadata: true, primaryColor: C.primary },
-    includePageNumbers: true,
     ...config
   };
+  cfg.branding = cfg.branding || {};
+  cfg.branding.primaryColor = normalizeColor(cfg.branding.primaryColor);
 
   const pdfDoc   = await PDFDocument.create();
   const bodyFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
@@ -183,7 +199,7 @@ function drawSegment(ctx, segment) {
   } else {
     drawKeyValue(ctx, segment);
   }
-  ctx.y -= 14;
+  ctx.y -= 18;
 }
 
 /* ── Key-Value ────────────────────────────────── */
@@ -193,7 +209,7 @@ function drawKeyValue(ctx, segment) {
   const labelWidth = 160;
   const valueX     = MARGIN + labelWidth + 20;
   const valueWidth = PAGE_WIDTH - MARGIN - valueX;
-  const lineHeight = 9 * 1.2;
+  const lineHeight = 12;
 
   for (let idx = 0; idx < fields.length; idx++) {
     const label = stripBrokenBar(fields[idx].label || "");
@@ -201,7 +217,7 @@ function drawKeyValue(ctx, segment) {
 
     const labelLines = wrapText(label, ctx.boldFont, 9, labelWidth);
     const valueLines = wrapText(value, ctx.bodyFont, 9, valueWidth);
-    const blockH     = Math.max(labelLines.length, valueLines.length) * lineHeight + 10;
+    const blockH = Math.max(labelLines.length, valueLines.length) * lineHeight + 12;
 
     ensureSpace(ctx, blockH + 4);
     const y = ctx.y;
@@ -214,19 +230,26 @@ function drawKeyValue(ctx, segment) {
       });
     }
 
-    labelLines.forEach((line, i) => {
-      ctx.page.drawText(line, {
-        x: MARGIN + 4, y: y - 4 - (i * lineHeight),
-        size: 9, font: ctx.boldFont, color: C.secondary
-      });
-    });
+       labelLines.forEach((line, i) => {
+  ctx.page.drawText(line, {
+    x: MARGIN + 4,
+    y: y - 8 - (i * lineHeight),
+    size: 9,
+    font: ctx.boldFont,
+    color: C.secondary
+  });
+});
 
-    valueLines.forEach((line, i) => {
-      ctx.page.drawText(line, {
-        x: valueX, y: y - 4 - (i * lineHeight),
-        size: 9, font: ctx.bodyFont, color: C.text
-      });
-    });
+valueLines.forEach((line, i) => {
+  ctx.page.drawText(line, {
+    x: valueX,
+    y: y - 8 - (i * lineHeight),
+    size: 9,
+    font: ctx.bodyFont,
+    color: C.text
+  });
+});
+
 
     ctx.y = y - blockH;
     ctx.page.drawLine({
@@ -247,7 +270,7 @@ function drawTable(ctx, segment) {
   if (!columns.length) return;
 
   const colWidths  = calculateColumnWidths(columns, fields, tableW);
-  const lineHeight = 8 * 1.2;
+  const lineHeight = 10.5;
   const hdrH       = 24;
 
   ensureSpace(ctx, hdrH);
@@ -257,13 +280,15 @@ function drawTable(ctx, segment) {
     x: MARGIN, y: hdrY - hdrH, width: tableW, height: hdrH, color: C.bgHeader
   });
 
+
   let hx = MARGIN;
-  columns.forEach((col, i) => {
+    columns.forEach((col, i) => {
     ctx.page.drawText(formatLabel(col), {
-      x: hx + 4, y: hdrY - 16, size: 8, font: ctx.boldFont, color: C.primary
+      x: hx + 4, y: hdrY - 18, size: 8, font: ctx.boldFont, color: C.primary
     });
     hx += colWidths[i];
   });
+
 
   ctx.page.drawLine({
     start: { x: MARGIN, y: hdrY - hdrH },
@@ -280,7 +305,7 @@ function drawTable(ctx, segment) {
       const text = stripBrokenBar(String(row[col] ?? ""));
       const cw   = colWidths[i] - 8;
       const lines = wrapText(text, ctx.bodyFont, 8, cw);
-      maxH = Math.max(maxH, lines.length * lineHeight + 8);
+      maxH = Math.max(24, lines.length * lineHeight + 10);
     });
 
     ensureSpace(ctx, maxH + 2);
@@ -303,12 +328,14 @@ function drawTable(ctx, segment) {
       const text  = stripBrokenBar(String(row[col] ?? ""));
       const cw    = colWidths[i] - 8;
       const lines = wrapText(text, ctx.bodyFont, 8, cw);
-      lines.forEach((line, li) => {
+
+           lines.forEach((line, li) => {
         ctx.page.drawText(line, {
-          x: cx + 4, y: rowY - 8 - (li * lineHeight),
+          x: cx + 4, y: rowY - 14 - (li * lineHeight),
           size: 8, font: ctx.bodyFont, color: C.text
         });
       });
+
       cx += colWidths[i];
     });
 

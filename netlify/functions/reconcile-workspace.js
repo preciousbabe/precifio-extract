@@ -48,9 +48,8 @@ exports.handler = async (event, context) => {
       if (error || !data) return err(404, "Workspace not found");
       return ok({ workspace: data });
     }
-  
-    
-        const { page = "1", limit = "50" } = event.queryStringParameters || {};
+
+    const { page = "1", limit = "50" } = event.queryStringParameters || {};
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
     const pageSize = Math.min(100, Math.max(1, parseInt(limit, 10) || 50));
     const from = (pageNum - 1) * pageSize;
@@ -68,7 +67,9 @@ exports.handler = async (event, context) => {
 
   if (event.httpMethod === "POST") {
     const body = JSON.parse(event.body || "{}");
-    const { name, date_from, date_to, match_settings } = body;
+    let { name, date_from, date_to, match_settings } = body;
+    const trimmedName = typeof name === "string" ? name.trim() : "";
+    const finalName = trimmedName || `Reconciliation ${new Date().toLocaleDateString()} ${Date.now()}`;
 
     const { data: settings } = await supabase
       .from("reconciliation_user_settings")
@@ -84,7 +85,7 @@ exports.handler = async (event, context) => {
       .from("reconciliation_workspaces")
       .insert({
         user_id: userId,
-        name: name || `Reconciliation ${new Date().toLocaleDateString()}`,
+        name: finalName,
         date_from: date_from || null,
         date_to: date_to || null,
         match_configuration: match_settings || settings.default_match_settings || {},
@@ -93,20 +94,46 @@ exports.handler = async (event, context) => {
       .select()
       .single();
 
-    if (error) return err(500, error.message);
+    if (error) {
+      if (error.message?.includes("duplicate key value violates unique constraint")) {
+        return err(409, "A workspace with this name already exists. Please choose a different name.", { code: "DUPLICATE_NAME" });
+      }
+      return err(500, error.message);
+    }
     return ok({ workspace: data });
   }
 
   if (event.httpMethod === "DELETE") {
     const { workspace_id } = JSON.parse(event.body || "{}");
+
+    // SECURITY FIX: Verify ownership BEFORE deleting anything
+    const { data: ws } = await supabase
+      .from("reconciliation_workspaces")
+      .select("id")
+      .eq("id", workspace_id)
+      .eq("user_id", userId)
+      .single();
+
+    if (!ws) return err(403, "Not authorized");
+
+    // Now safe to cascade delete
+    await supabase
+      .from("reconciliation_matches")
+      .delete()
+      .eq("workspace_id", workspace_id);
+
+    await supabase
+      .from("reconciliation_documents")
+      .delete()
+      .eq("workspace_id", workspace_id);
+
     const { error } = await supabase
       .from("reconciliation_workspaces")
-      .update({ deleted_at: new Date().toISOString() })
+      .delete()
       .eq("id", workspace_id)
       .eq("user_id", userId);
     if (error) return err(500, error.message);
     return ok({ success: true });
   }
-
   return err(405, "Method not allowed");
 };

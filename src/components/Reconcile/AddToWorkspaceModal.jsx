@@ -4,13 +4,14 @@ import { createPortal } from "react-dom";
 import { useReconciliation } from "../../hooks/useReconciliation";
 
 export default function AddToWorkspaceModal({ documents, onClose, onAdded }) {
-    const {
+     const {
     workspaces,
     fetchWorkspaces,
     createWorkspace,
     addDocuments,
     deleteWorkspace,
     loading,
+    error,
   } = useReconciliation();
 
 
@@ -18,15 +19,27 @@ export default function AddToWorkspaceModal({ documents, onClose, onAdded }) {
   const [newName, setNewName] = useState("");
   const [selectedWs, setSelectedWs] = useState(null);
   const [targetSide, setTargetSide] = useState("A");
+  const [localError, setLocalError] = useState(null);
 
   useEffect(() => { fetchWorkspaces(); }, [fetchWorkspaces]);
+  useEffect(() => { setLocalError(null); }, [newName, mode]);
 
-    const handleCreateAndAdd = async () => {
-    const ws = await createWorkspace({ name: newName || undefined });
-    if (documents?.length > 0) {
-      await addDocuments(ws.id, targetSide, documents);
+        const handleCreateAndAdd = async () => {
+    setLocalError(null);
+    const trimmed = newName.trim();
+    if (trimmed && workspaces.some((w) => w.name.toLowerCase() === trimmed.toLowerCase())) {
+      setLocalError("A workspace with this name already exists.");
+      return;
     }
-    onAdded?.(ws.id, targetSide);
+    try {
+      const ws = await createWorkspace({ name: trimmed || undefined });
+      if (documents?.length > 0) {
+        await addDocuments(ws.id, targetSide, documents);
+      }
+      onAdded?.(ws.id, targetSide);
+    } catch {
+      // server error is already captured in the `error` state from the hook
+    }
   };
 
 
@@ -66,11 +79,18 @@ export default function AddToWorkspaceModal({ documents, onClose, onAdded }) {
             ? `Reconcile ${documents.length} document${documents.length > 1 ? "s" : ""}`
             : "Open Reconciliation Workspace"}
         </h3>
+        
         <p style={{ fontSize: "13px", color: "#64748b", marginBottom: "16px" }}>
           {documents?.length > 0
             ? "Choose a workspace and which side to add them to."
             : "Choose an existing workspace or create a new one. You'll upload files inside."}
         </p>
+
+                {(localError || error) && (
+          <div style={{ background: "#fef2f2", color: "#b91c1c", padding: "10px 12px", borderRadius: "8px", fontSize: "13px", marginBottom: "16px", border: "1px solid #fecaca" }}>
+            {localError || error}
+          </div>
+        )}
 
                 {documents?.length > 0 && (
           <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>

@@ -5,9 +5,10 @@ import { useAuth } from "../../hooks/useAuth";
 
 export default function QueueItem({ item, queue }) {
   const { isGuest, requireAuth } = useAuth();
-  const isFailed = item.status === "failed";
-  const isCompleted = item.status === "completed";
-  const isProcessing = item.status === "processing";
+const isFailed = item.status === "failed";
+const isCompleted = item.status === "completed";
+const isProcessing = item.status === "processing";
+const isRecoverable = isFailed && !!item.extractionId;
   const canRemove = !queue.processing || isCompleted || isFailed;
 
   // Check if this item failed due to guest limit
@@ -27,13 +28,13 @@ export default function QueueItem({ item, queue }) {
   };
 
   const handleAction = () => {
-    if (isGuest) {
-      requireAuth('signup');
-      return;
-    }
-    // Authenticated users can retry
-    queue.retryItem(item.id);
-  };
+  if (isGuest) {
+    requireAuth("signup");
+    return;
+  }
+
+  queue.retryItem(item.id);
+};
 
   return (
     <div className={`queue-item ${item.status}`}>
@@ -70,10 +71,13 @@ export default function QueueItem({ item, queue }) {
 
           {/* RETRY / SIGN UP */}
           {isFailed && !isGuestLimitError && (
-            <button onClick={() => queue.retryItem(item.id)} className="queue-btn warning">
-              ↻ Retry
-            </button>
-          )}
+    <button
+    onClick={() => queue.retryItem(item.id)}
+    className="queue-btn warning"
+   >
+    {isRecoverable ? "↻ Recover Result" : "↻ Retry"}
+   </button>
+   )}
 
           {isGuestLimitError && (
             <button onClick={() => requireAuth('signup')} className="queue-btn primary">

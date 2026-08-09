@@ -21,20 +21,41 @@ export function useDocumentQueue() {
   //----------------------------------------------------
 
   const createQueueItem = (file) => ({
-    id: crypto.randomUUID(),
-    file,
-    name: file.name,
-    size: file.size,
-    type: file.type,
-    status: "queued",
-    progress: 0,
-    result: null,
-    extractedText: "",
-    error: null,
-    startedAt: null,
-    completedAt: null,
-    selected: false
-  });
+  id: crypto.randomUUID(),
+  file,
+  name: file.name,
+  size: file.size,
+  type: file.type,
+
+  // Queue lifecycle
+  status: "queued",
+  progress: 0,
+
+  // Extraction result
+  result: null,
+  extractedText: "",
+
+  // Error state
+  error: null,
+  errorCode: null,
+  needsAction: null,
+
+  // Backend job identity
+  // Preserved across retries so a completed backend job
+  // can be recovered instead of treated as a new extraction.
+  jobId: null,
+  extractionId: null,
+
+  // Timing
+  startedAt: null,
+  completedAt: null,
+
+  // Retry / recovery state
+  retryCount: 0,
+  recovering: false,
+
+  selected: false
+});
 
   //----------------------------------------------------
   // Add files
@@ -136,39 +157,66 @@ export function useDocumentQueue() {
   // Retry single item
   //----------------------------------------------------
 
-  const retryItem = useCallback((id) => {
-    updateItem(id, {
-      status: "queued",
-      progress: 0,
-      error: null,
-      result: null,
-      extractedText: "",
-      startedAt: null,
-      completedAt: null
-    });
-  }, [updateItem]);
+ const retryItem = useCallback((id) => {
+  setItems(prev =>
+    prev.map(item => {
+      if (item.id !== id) return item;
+
+      return {
+        ...item,
+
+        // Put it back into the queue.
+        status: "queued",
+        progress: 0,
+
+        // Clear the visible error.
+        error: null,
+        errorCode: null,
+        needsAction: null,
+
+        startedAt: null,
+        completedAt: null,
+        retryCount: (item.retryCount || 0) + 1,
+        recovering: true,
+        result: null,
+        extractedText: ""
+      };
+    })
+  );
+}, []);
 
   //----------------------------------------------------
   // Retry all failed
   //----------------------------------------------------
 
   const retryFailed = useCallback(() => {
-    setItems(prev =>
-      prev.map(item => {
-        if (item.status !== "failed") return item;
-        return {
-          ...item,
-          status: "queued",
-          progress: 0,
-          error: null,
-          result: null,
-          extractedText: "",
-          startedAt: null,
-          completedAt: null
-        };
-      })
-    );
-  }, []);
+  setItems(prev =>
+    prev.map(item => {
+      if (item.status !== "failed") return item;
+
+      return {
+        ...item,
+
+        status: "queued",
+        progress: 0,
+
+        error: null,
+        errorCode: null,
+        needsAction: null,
+
+        // Preserve backend job identity and previous result.
+        // queueManager/backend will determine whether the
+        // existing job can be recovered without another AI call.
+        startedAt: null,
+        completedAt: null,
+
+        retryCount: (item.retryCount || 0) + 1,
+        recovering: true
+      };
+    })
+  );
+}, []);
+
 
   //----------------------------------------------------
   // Viewer
@@ -222,22 +270,36 @@ export function useDocumentQueue() {
   // Statistics
   //----------------------------------------------------
 
-  const stats = useMemo(() => {
-    const queued = items.filter(i => i.status === "queued").length;
-    const processingCount = items.filter(i => i.status === "processing").length;
-    const completed = items.filter(i => i.status === "completed").length;
-    const failed = items.filter(i => i.status === "failed").length;
-    const selectedCount = selectedIds.size;
+const stats = useMemo(() => {
+  const queued = items.filter(i => i.status === "queued").length;
 
-    return {
-      total: items.length,
-      queued,
-      processing: processingCount,
-      completed,
-      failed,
-      selected: selectedCount
-    };
-  }, [items, selectedIds]);
+  const processingStatuses = new Set([
+    "uploading",
+    "sending",
+    "processing",
+    "extracting",
+    "ocr",
+    "ai",
+    "saving"
+  ]);
+
+  const processingCount = items.filter(
+    i => processingStatuses.has(i.status)
+  ).length;
+
+  const completed = items.filter(i => i.status === "completed").length;
+  const failed = items.filter(i => i.status === "failed").length;
+  const selectedCount = selectedIds.size;
+
+  return {
+    total: items.length,
+    queued,
+    processing: processingCount,
+    completed,
+    failed,
+    selected: selectedCount
+  };
+}, [items, selectedIds]);
 
   //----------------------------------------------------
   // Public API

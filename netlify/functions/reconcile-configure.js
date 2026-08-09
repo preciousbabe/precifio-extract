@@ -50,7 +50,6 @@ function similarity(a, b) {
   return mx === 0 ? 1 : 1 - d / mx;
 }
 
-
 function canonicalizeFieldName(raw, aliasMap) {
   const key = String(raw).toLowerCase().trim();
   return aliasMap.get(key)?.canonical || key;
@@ -60,12 +59,51 @@ function detectFieldType(key, aliasMap) {
   const lower = key.toLowerCase();
   if (aliasMap.has(lower)) return aliasMap.get(lower).type;
   if (/date|time|day|month|year/.test(lower)) return "date";
-  // reference BEFORE numeric so "reference" and "invoice_ref" don't become numeric
   if (/ref|reference|invoice\s*#?|po\s*#?|order\s*#?|transaction\s*#?|check\s*#?|cheque\s*#?/.test(lower)) return "reference";
   if (/amount|total|sum|price|cost|value|payment|paid|due|balance|qty|quantity/.test(lower)) return "numeric";
   return "text";
 }
 
+function dateSemanticScore(fieldNameA, fieldNameB) {
+  const a = fieldNameA.toLowerCase();
+  const b = fieldNameB.toLowerCase();
+  const invoiceTerms = ['invoice', 'bill', 'issued', 'created', 'document', 'generated'];
+  const paymentTerms = ['payment', 'paid', 'settlement', 'clearance', 'remittance', 'processed'];
+  const dueTerms = ['due', 'deadline', 'maturity', 'expiry'];
+
+  const aIsInvoice = invoiceTerms.some(t => a.includes(t));
+  const bIsInvoice = invoiceTerms.some(t => b.includes(t));
+  const aIsPayment = paymentTerms.some(t => a.includes(t));
+  const bIsPayment = paymentTerms.some(t => b.includes(t));
+  const aIsDue = dueTerms.some(t => a.includes(t));
+  const bIsDue = dueTerms.some(t => b.includes(t));
+
+  if ((aIsInvoice && bIsPayment) || (aIsPayment && bIsInvoice)) return 1.0;
+  if ((aIsDue && bIsPayment) || (aIsPayment && bIsDue)) return 0.5;
+  if ((aIsInvoice || aIsDue) && (bIsInvoice || bIsDue)) return 0.3;
+  return 0.1;
+}
+
+function getDateDirection(fieldNameA, fieldNameB) {
+  const a = fieldNameA.toLowerCase();
+  const b = fieldNameB.toLowerCase();
+  const paymentTerms = ['payment', 'paid', 'settlement', 'clearance', 'remittance', 'processed'];
+  const invoiceTerms = ['invoice', 'bill', 'issued', 'created', 'document', 'generated'];
+  const dueTerms = ['due', 'deadline', 'maturity'];
+
+  const aIsPayment = paymentTerms.some(t => a.includes(t));
+  const bIsPayment = paymentTerms.some(t => b.includes(t));
+  const aIsInvoice = invoiceTerms.some(t => a.includes(t));
+  const bIsInvoice = invoiceTerms.some(t => b.includes(t));
+  const aIsDue = dueTerms.some(t => a.includes(t));
+  const bIsDue = dueTerms.some(t => b.includes(t));
+
+  if (aIsInvoice && bIsPayment) return 'a_before_b';
+  if (aIsPayment && bIsInvoice) return 'b_before_a';
+  if (aIsDue && bIsPayment) return 'b_before_a';
+  if (aIsPayment && bIsDue) return 'a_before_b';
+  return null;
+}
 
 async function resolveFieldAliases(userId) {
   const { data } = await supabase
@@ -82,7 +120,6 @@ async function resolveFieldAliases(userId) {
   return map;
 }
 
-
 function autoGenerateMatchConfig(sideAFields, sideBFields, aliasMap) {
   const aCanon = sideAFields.map(f => ({ raw: f, canon: canonicalizeFieldName(f, aliasMap) }));
   const bCanon = sideBFields.map(f => ({ raw: f, canon: canonicalizeFieldName(f, aliasMap) }));
@@ -94,32 +131,48 @@ function autoGenerateMatchConfig(sideAFields, sideBFields, aliasMap) {
     const exact = bCanon.find(bf => bf.canon === af.canon && !usedB.has(bf.raw));
     if (exact) {
       const type = detectFieldType(af.canon, aliasMap);
-      const weight = type === "numeric" ? 0.35 : type === "date" ? 0.25 : type === "reference" ? 0.25 : 0.15;
+      const isAmount = /amount|total|sum|payment|paid|due/.test(af.canon);
+      const isCurrency = /currency/.test(af.canon);
+      const isReference = type === "reference";
+      const dateDirection = (type === "date") ? getDateDirection(af.raw, exact.raw) : null;
+
+      const weight = isAmount ? 0.35 : type === "date" ? 0.25 : isReference ? 0.25 : isCurrency ? 0.10 : 0.15;
       rules.push({
         side_a_field: af.raw,
         side_b_field: exact.raw,
         canonical: af.canon,
         type,
         weight,
-        tolerance: type === "numeric" ? 0.01 : type === "date" ? 7 : null,
-        strategy: type === "numeric" ? "exact_with_tolerance" : type === "date" ? "date_proximity" : type === "reference" ? "normalized_exact" : "fuzzy"
+        is_gate: isAmount || isCurrency || isReference,
+        tolerance: isAmount ? 0.01 : type === "date" ? 7 : null,
+        tolerance_percent: isAmount ? 1 : null,
+        strategy: isAmount ? "exact_with_tolerance" : type === "date" ? "date_proximity" : isReference ? "normalized_exact" : isCurrency ? "exact" : "fuzzy",
+        date_direction: dateDirection
       });
       usedB.add(exact.raw);
       continue;
     }
 
-
     const fuzzy = bCanon.find(bf => similarity(af.canon, bf.canon) >= 0.75 && !usedB.has(bf.raw));
     if (fuzzy) {
       const type = detectFieldType(af.canon, aliasMap);
+      const isAmount = /amount|total|sum|payment|paid|due/.test(af.canon);
+      const isCurrency = /currency/.test(af.canon);
+      const isReference = type === "reference";
+      const dateDirection = (type === "date") ? getDateDirection(af.raw, fuzzy.raw) : null;
+
+      const weight = isAmount ? 0.35 : type === "date" ? 0.25 : isReference ? 0.25 : isCurrency ? 0.10 : 0.15;
       rules.push({
         side_a_field: af.raw,
         side_b_field: fuzzy.raw,
         canonical: af.canon,
         type,
-        weight: 0.15,
-        tolerance: type === "numeric" ? 0.05 : type === "date" ? 14 : null,
-        strategy: "fuzzy"
+        weight,
+        is_gate: isAmount || isCurrency || isReference,
+        tolerance: isAmount ? 0.01 : type === "date" ? 7 : null,
+        tolerance_percent: isAmount ? 1 : null,
+        strategy: isAmount ? "exact_with_tolerance" : type === "date" ? "date_proximity" : isReference ? "normalized_exact" : isCurrency ? "exact" : "fuzzy",
+        date_direction: dateDirection
       });
       usedB.add(fuzzy.raw);
     }
@@ -140,7 +193,6 @@ function autoGenerateMatchConfig(sideAFields, sideBFields, aliasMap) {
     generated_at: new Date().toISOString()
   };
 }
-
 
 exports.handler = async (event, context) => {
   if (event.httpMethod === "OPTIONS") return ok({});
@@ -165,17 +217,15 @@ exports.handler = async (event, context) => {
       return ok({ configuration: ws.match_configuration, auto_generated: false });
     }
 
-    const [{ data: sideA }, { data: sideB }] = await Promise.all([
-      supabase.rpc("get_workspace_fields", { p_workspace_id: workspace_id, p_side: "A" }),
-      supabase.rpc("get_workspace_fields", { p_workspace_id: workspace_id, p_side: "B" }),
+    const [{ data: sideADocs }, { data: sideBDocs }] = await Promise.all([
+      supabase.from("reconciliation_documents").select("extracted_fields").eq("workspace_id", workspace_id).eq("dataset_side", "A"),
+      supabase.from("reconciliation_documents").select("extracted_fields").eq("workspace_id", workspace_id).eq("dataset_side", "B"),
     ]);
 
     const aliasMap = await resolveFieldAliases(userId);
-    const config = autoGenerateMatchConfig(
-      (sideA || []).map(r => r.field_key),
-      (sideB || []).map(r => r.field_key),
-      aliasMap
-    );
+    const aFields = [...new Set((sideADocs || []).flatMap(d => Object.keys(d.extracted_fields || {})))];
+    const bFields = [...new Set((sideBDocs || []).flatMap(d => Object.keys(d.extracted_fields || {})))];
+    const config = autoGenerateMatchConfig(aFields, bFields, aliasMap);
 
     await supabase
       .from("reconciliation_workspaces")

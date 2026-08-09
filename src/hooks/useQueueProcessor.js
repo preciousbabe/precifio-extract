@@ -78,87 +78,193 @@ export function useQueueProcessor(queueApi) {
   // Process one document
   //----------------------------------------------------
 
-  async function processItem(index) {
-    const item = itemsRef.current[index];
-    if (!item) return;
+async function processItem(index) {
+  const item = itemsRef.current[index];
+  if (!item) return;
 
-    setCurrentIndex(index);
+  setCurrentIndex(index);
+
+  updateItem(item.id, {
+    status: "uploading",
+    progress: 0,
+    error: null,
+    errorCode: null,
+    needsAction: null,
+    startedAt: new Date().toISOString(),
+  });
+
+  const simulator = createProgressSimulator(
+    item.id,
+    updateItem,
+    itemsRef
+  );
+
+  simulator.start();
+
+  try {
+    const result = await queueManager.process(
+      item.file,
+      {
+        
+        jobId: item.jobId || item.extractionId || null,
+
+        onProgress(progress) {
+          updateItem(item.id, {
+            progress: progress.progress,
+            status: progress.stage,
+          });
+        },
+      }
+    );
+
+    simulator.stop();
+
+    // Preserve the backend job identity returned by queueManager.
+    const recoveredJobId =
+      result?.jobId ||
+      result?.extractionId ||
+      item.jobId ||
+      item.extractionId ||
+      null;
 
     updateItem(item.id, {
-      status: "uploading",
-      progress: 0,
+      status: "completed",
+      progress: 100,
+      result,
       error: null,
-      startedAt: new Date().toISOString()
+      errorCode: null,
+      needsAction: null,
+
+      jobId: recoveredJobId,
+      extractionId: result?.extractionId || recoveredJobId,
+
+      completedAt: new Date().toISOString(),
+      recovering: false,
     });
 
-    const simulator = createProgressSimulator(item.id, updateItem, itemsRef);
-    simulator.start();
+  } catch (err) {
+    simulator.stop();
 
-    try {
-      const result = await queueManager.process(
-        item.file,
-        {
-          onProgress(progress) {
-            // Real backend progress overrides simulation
-            updateItem(item.id, {
-              progress: progress.progress,
-              status: progress.stage
-            });
-          }
-        }
-      );
+    console.error(
+      "Process error:",
+      err.message,
+      err.code,
+      err.status,
+      err.jobId
+    );
 
-      simulator.stop();
+    if (
+      err.recoverable === true ||
+      err.code === "EXTRACTION_TIMEOUT" ||
+      err.code === "JOB_RECOVERY_AVAILABLE"
+    ) {
+      const recoveredJobId =
+        err.jobId ||
+        item.jobId ||
+        item.extractionId ||
+        null;
 
       updateItem(item.id, {
-        status: "completed",
-        progress: 100,
-        result,
-        completedAt: new Date().toISOString()
+        status: "failed",
+        progress: Math.max(item.progress || 0, 74),
+        error: err.message || "Extraction is still completing in the background.",
+        errorCode: err.code || "EXTRACTION_TIMEOUT",
+
+        jobId: recoveredJobId,
+        extractionId: recoveredJobId,
+       needsAction: "recover",
+
+        recovering: false,
+        completedAt: new Date().toISOString(),
       });
 
-    } catch (err) {
-      simulator.stop();
-      console.error("Process error:", err.message, err.code);
+      return;
+    }
 
-      if (err.status === 402 || err.code === "GUEST_LIMIT_REACHED" || err.code === "INSUFFICIENT_CREDITS" || err.code === "GUEST_EXPIRED") {
-        if (err.code === "GUEST_LIMIT_REACHED" || err.code === "GUEST_EXPIRED") {
-          window.dispatchEvent(new CustomEvent("showAuthModal", {
-            detail: { mode: "signup" }
-          }));
-        }
-        if (err.code === "INSUFFICIENT_CREDITS") {
-          window.dispatchEvent(new CustomEvent("showBuyCredits", {
+    // ------------------------------------------------------------
+    // CREDIT / GUEST ACTION REQUIRED
+    // ------------------------------------------------------------
+
+    if (
+      err.status === 402 ||
+      err.code === "GUEST_LIMIT_REACHED" ||
+      err.code === "INSUFFICIENT_CREDITS" ||
+      err.code === "GUEST_EXPIRED"
+    ) {
+      if (
+        err.code === "GUEST_LIMIT_REACHED" ||
+        err.code === "GUEST_EXPIRED"
+      ) {
+        window.dispatchEvent(
+          new CustomEvent("showAuthModal", {
+            detail: { mode: "signup" },
+          })
+        );
+      }
+
+      if (err.code === "INSUFFICIENT_CREDITS") {
+        window.dispatchEvent(
+          new CustomEvent("showBuyCredits", {
             detail: {
               required: err.required || 1,
               available: err.available || 0,
-              fileName: item.file.name
-            }
-          }));
-        }
-
-        updateItem(item.id, {
-          status: "failed",
-          error: err.message,
-          errorCode: err.code,
-          needsAction: err.code === "INSUFFICIENT_CREDITS" ? "buy-credits" : "signup",
-          completedAt: new Date().toISOString()
-        });
-
-        queueApi.pause();
-        return;
+              fileName: item.file.name,
+            },
+          })
+        );
       }
 
       updateItem(item.id, {
         status: "failed",
         error: err.message,
-        errorCode: err.code || null,
-        completedAt: new Date().toISOString()
-      });
-    }
-  }
+        errorCode: err.code,
+        needsAction:
+          err.code === "INSUFFICIENT_CREDITS"
+            ? "buy-credits"
+            : "signup",
 
-// ── Replace the useEffect at the bottom ──
+        // Preserve job identity if one exists.
+        jobId: err.jobId || item.jobId || null,
+        extractionId:
+          err.extractionId ||
+          item.extractionId ||
+          item.jobId ||
+          null,
+
+        completedAt: new Date().toISOString(),
+        recovering: false,
+      });
+
+      queueApi.pause();
+      return;
+    }
+
+    // ------------------------------------------------------------
+    // GENUINE FAILURE
+    // ------------------------------------------------------------
+
+    updateItem(item.id, {
+      status: "failed",
+      progress: 100,
+      error: err.message,
+      errorCode: err.code || null,
+
+      // Never throw away a known backend job ID.
+      jobId: err.jobId || item.jobId || null,
+      extractionId:
+        err.extractionId ||
+        item.extractionId ||
+        item.jobId ||
+        null,
+
+      needsAction: null,
+      completedAt: new Date().toISOString(),
+      recovering: false,
+    });
+  }
+}
+
+
 
   useEffect(() => {
     if (!processingRef.current) return;
@@ -166,22 +272,25 @@ export function useQueueProcessor(queueApi) {
     if (isRunningRef.current) return;
 
     async function runNext() {
-      const next = findNextQueued();
-      if (next === -1) {
-        stop();
-        return;
-      }
+  const next = findNextQueued();
 
-      isRunningRef.current = true;
-      await processItem(next);
-      isRunningRef.current = false;
+  if (next === -1) {
+    stop();
+    return;
+  }
 
-      // Chain to next item without waiting for a dependency change
-      if (processingRef.current && !pausedRef.current) {
-        setTimeout(runNext, 0);
-      }
-    }
+  isRunningRef.current = true;
 
+  try {
+    await processItem(next);
+  } finally {
+    isRunningRef.current = false;
+  }
+
+  if (processingRef.current && !pausedRef.current) {
+    setTimeout(runNext, 0);
+  }
+}
     runNext();
   }, [processing, paused, stop, setCurrentIndex, updateItem, queueApi]);
 }

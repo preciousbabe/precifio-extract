@@ -30,6 +30,19 @@ function parseMultipart(event) {
   };
 }
 
+function getRequestedJobId(event) {
+  const headerJobId =
+    event.headers?.["x-extraction-job-id"] ||
+    event.headers?.["X-Extraction-Job-Id"] ||
+    null;
+
+  if (headerJobId) return headerJobId;
+
+  const queryJobId = event.queryStringParameters?.jobId || null;
+
+  return queryJobId;
+}
+
 function inferMimeType(filename) {
   const ext = filename.split(".").pop().toLowerCase();
   const map = {
@@ -155,6 +168,12 @@ exports.handler = async (event, context) => {
       };
     }
 
+
+const documentFingerprint = crypto
+  .createHash("sha256")
+  .update(file.buffer)
+  .digest("hex");
+
     // Auth / Guest
     const authHeader = event.headers.authorization || event.headers.Authorization;
     const token = authHeader ? authHeader.replace("Bearer ", "") : null;
@@ -184,93 +203,330 @@ exports.handler = async (event, context) => {
       }
     }
 
-    // ── Idempotency key: file hash + user/guest ──
+    const requestedJobId = getRequestedJobId(event);
+
+       // ── Idempotency key: file hash + user/guest ──
     const idempotencyKey = crypto
-      .createHash('sha256')
-      .update(file.buffer.toString('base64').slice(0, 8000) + (userId || guestId || 'guest'))
-      .digest('hex');
+      .createHash("sha256")
+      .update(
+        file.buffer.toString("base64").slice(0, 8000) +
+        (userId || guestId || "guest")
+      )
+      .digest("hex");
+     let cachedJob = null;
 
-    // Check for recent completed extraction (retry path)
-    const { data: cachedJob } = await supabase
-      .from('extractions')
-      .select('id, status, raw_result, actual_cost, estimated_cost, created_at')
-      .eq('idempotency_key', idempotencyKey)
-      .gt('created_at', new Date(Date.now() - 10 * 60 * 1000).toISOString())
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (cachedJob?.status === 'completed' && cachedJob.raw_result) {
-      const extractedData = cachedJob.raw_result;
-      const docType = (extractedData.document_type || extractedData.category || 'generic').toString().toLowerCase().trim();
-      
-      let rawSegments = normalizeSegments(Array.isArray(extractedData.segments) ? extractedData.segments : []);
-      const originalSegments = JSON.parse(JSON.stringify(rawSegments));
-      
-      let currentBalance = null;
-      if (!isGuest && userId) {
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("credits_remaining")
-          .eq("id", userId)
-          .single();
-        currentBalance = profile?.credits_remaining ?? null;
-      }
-
-      if (isGuest && guestId) {
+    if (requestedJobId) {
+      const { data: requestedJob, error: requestedJobError } =
         await supabase
-          .from("guest_extractions")
-          .update({ extraction_count: 1, last_used: new Date().toISOString() })
-          .eq("guest_id", guestId);
+          .from("extractions")
+     .select(
+     "id, status, raw_result, actual_cost, estimated_cost, created_at, updated_at, user_id, guest_id, file_name, file_type, document_type"
+    )
+          .eq("id", requestedJobId)
+          .maybeSingle();
+
+      if (requestedJobError) {
+        console.error(
+          "Requested job lookup failed:",
+          requestedJobError.message
+        );
       }
 
-      return {
-        statusCode: 200,
-        headers,
-        body: JSON.stringify({
-          success: true,
-          extractionId: cachedJob.id,
-          isGuest,
-          fileName: file.name,
-          fileType: validation.mimeType,
-          documentSummary: extractedData.document_summary,
-          documentType: docType,
-          originalSegments,
-          segments: extractedData.segments,
-          cached: true,
-          metadata: {
-            patternVersion: 1,
-            processedAt: new Date().toISOString(),
-            extraction: {
-              finalMethod: 'cached',
-              textLength: 0,
-              wordCount: 0,
-              estimatedPages: cachedJob.estimated_cost,
-            },
-            creditsUsed: isGuest ? 0 : cachedJob.actual_cost,
-            newBalance: isGuest ? null : currentBalance,
-          },
-        }),
-      };
+      if (requestedJob) {
+        // Never allow one user's retry request to recover another
+        // user's extraction.
+        const belongsToCurrentUser =
+          (!requestedJob.user_id && !userId) ||
+          (requestedJob.user_id && requestedJob.user_id === userId) ||
+          (requestedJob.guest_id && requestedJob.guest_id === guestId);
+
+        if (belongsToCurrentUser) {
+          cachedJob = requestedJob;
+        }
+      }
     }
 
-    // If a job is still processing from a recent attempt, tell client to poll
-    if (cachedJob?.status === 'processing' && 
-        Date.now() - new Date(cachedJob.created_at).getTime() < 2 * 60 * 1000) {
+    // ------------------------------------------------------------
+    // IDEMPOTENCY RECOVERY
+    // ------------------------------------------------------------
+    //
+    // If no explicit job ID was supplied, locate the latest job
+    // created for the same file/user combination.
+    //
+    // We intentionally do NOT restrict this to 10 minutes.
+    // The job itself is the durable recovery record.
+    //
+    if (!cachedJob) {
+      const { data: existingJob, error: existingJobError } =
+        await supabase
+          .from("extractions")
+          .select(
+            "id, status, raw_result, actual_cost, estimated_cost, created_at, updated_at, user_id, guest_id, file_name, document_type"
+          )
+          .eq("idempotency_key", idempotencyKey)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+      if (existingJobError) {
+        console.error(
+          "Idempotency job lookup failed:",
+          existingJobError.message
+        );
+      }
+
+      cachedJob = existingJob || null;
+    }
+
+
+if (cachedJob?.status === "completed" && cachedJob.raw_result) {
+  const extractedData = JSON.parse(
+    JSON.stringify(cachedJob.raw_result)
+  );
+
+  const docType = (
+    extractedData.document_type ||
+    extractedData.category ||
+    cachedJob.document_type ||
+    "generic"
+  )
+    .toString()
+    .toLowerCase()
+    .trim();
+
+  // ------------------------------------------------------------
+  // NORMALIZE THE ORIGINAL RAW EXTRACTION
+  // ------------------------------------------------------------
+
+  const rawSegments = normalizeSegments(
+    Array.isArray(extractedData.segments)
+      ? extractedData.segments
+      : []
+  );
+
+  const originalSegments = JSON.parse(
+    JSON.stringify(rawSegments)
+  );
+
+  // ------------------------------------------------------------
+  // LOAD SAVED PATTERN
+  // ------------------------------------------------------------
+
+  let savedPattern = null;
+  let patternApplied = false;
+
+  if (!isGuest && userId) {
+    const { data: patterns, error: patternError } =
+      await supabase
+        .from("extraction_patterns")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("document_fingerprint", documentFingerprint)
+        .order("last_used_at", { ascending: false })
+        .limit(1);
+
+    if (patternError) {
+      console.error(
+        "Cached recovery pattern lookup failed:",
+        patternError.message
+      );
+    }
+
+    if (patterns && patterns.length > 0) {
+      savedPattern = patterns[0];
+      patternApplied = true;
+
+      await supabase
+        .from("extraction_patterns")
+        .update({
+          usage_count: (patterns[0].usage_count || 0) + 1,
+          last_used_at: new Date().toISOString(),
+        })
+        .eq("id", patterns[0].id);
+    }
+  }
+
+  // ------------------------------------------------------------
+  // FALLBACK: DOCUMENT TYPE PATTERN
+  // ------------------------------------------------------------
+
+  if (!isGuest && userId && !savedPattern) {
+    const { data: typePatterns, error: typePatternError } =
+      await supabase
+        .from("extraction_patterns")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("document_type", docType)
+        .order("last_used_at", { ascending: false })
+        .limit(1);
+
+    if (typePatternError) {
+      console.error(
+        "Cached recovery document-type pattern lookup failed:",
+        typePatternError.message
+      );
+    }
+
+    if (typePatterns && typePatterns.length > 0) {
+      savedPattern = typePatterns[0];
+      patternApplied = true;
+
+      await supabase
+        .from("extraction_patterns")
+        .update({
+          usage_count: (typePatterns[0].usage_count || 0) + 1,
+          last_used_at: new Date().toISOString(),
+        })
+        .eq("id", typePatterns[0].id);
+    }
+  }
+
+  // ------------------------------------------------------------
+  // APPLY SAVED CORRECTIONS
+  // ------------------------------------------------------------
+
+  extractedData.segments = JSON.parse(
+    JSON.stringify(rawSegments)
+  );
+
+  if (savedPattern?.corrections) {
+    applyCorrections(
+      extractedData,
+      savedPattern.corrections
+    );
+  }
+
+  const segments = extractedData.segments;
+
+  // ------------------------------------------------------------
+  // CURRENT CREDIT BALANCE
+  // ------------------------------------------------------------
+
+  let currentBalance = null;
+
+  if (!isGuest && userId) {
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("credits_remaining")
+      .eq("id", userId)
+      .single();
+
+    currentBalance = profile?.credits_remaining ?? null;
+  }
+
+  if (isGuest && guestId) {
+    await supabase
+      .from("guest_extractions")
+      .update({
+        last_used: new Date().toISOString(),
+      })
+      .eq("guest_id", guestId);
+  }
+
+  console.log(
+    `Recovering completed extraction ${cachedJob.id} without AI`,
+    {
+      patternApplied,
+      patternId: savedPattern?.id || null,
+    }
+  );
+
+  return {
+    statusCode: 200,
+    headers,
+    body: JSON.stringify({
+      success: true,
+      status: "completed",
+
+      jobId: cachedJob.id,
+      extractionId: cachedJob.id,
+
+      isGuest,
+
+      fileName:
+        cachedJob.file_name ||
+        file.name,
+
+      fileType:
+        cachedJob.file_type ||
+        validation.mimeType,
+
+      documentSummary:
+        extractedData.document_summary,
+
+      documentType: docType,
+
+      // IMPORTANT:
+      // originalSegments remain the untouched extraction.
+      originalSegments,
+
+      // segments contain saved corrections.
+      segments,
+
+      // IMPORTANT FOR FRONTEND
+      savedPattern,
+      patternApplied,
+
+      cached: true,
+      recovered: true,
+
+      metadata: {
+        documentFingerprint,
+
+        patternVersion: 1,
+
+        processedAt:
+          cachedJob.updated_at ||
+          cachedJob.created_at ||
+          new Date().toISOString(),
+
+        extraction: {
+          ...(extractedData.metadata?.extraction || {}),
+          finalMethod: "cached",
+          textLength:
+            extractedData.metadata?.extraction?.textLength || 0,
+          wordCount:
+            extractedData.metadata?.extraction?.wordCount || 0,
+          estimatedPages:
+            cachedJob.estimated_cost || 0,
+        },
+
+        creditsUsed:
+          isGuest
+            ? 0
+            : cachedJob.actual_cost || 0,
+
+        newBalance:
+          isGuest
+            ? null
+            : currentBalance,
+
+        cached: true,
+        recovered: true,
+      },
+    }),
+  };
+}
+      
+    if (cachedJob?.status === "processing") {
       return {
         statusCode: 202,
         headers,
         body: JSON.stringify({
-          status: 'processing',
+          status: "processing",
           jobId: cachedJob.id,
-          message: 'Extraction in progress. Please poll for results.',
+          extractionId: cachedJob.id,
+          message:
+            "Extraction is already running. Continue polling this job.",
           retryAfter: 3,
+          recovering: true,
         }),
       };
     }
 
-    // If we have a stale/failed job, reuse its ID so we never litter the DB with duplicates
-    let extractionId = cachedJob?.id || crypto.randomUUID();
+    
+    const extractionId =
+      cachedJob?.id || crypto.randomUUID();
 
     // Guest tracking with IP rate limit
     if (isGuest) {
@@ -360,16 +616,7 @@ exports.handler = async (event, context) => {
     let extractionMethod = extraction.metadata.method;
     const cleanedText = cleanOCR(finalText || "");
    
-    const fingerprintSource = cleanedText
-      .toLowerCase()
-      .replace(/\s+/g, " ")
-      .trim();
-
-    const documentFingerprint = crypto
-      .createHash("sha256")
-      .update(fingerprintSource.substring(0, 5000))
-      .digest("hex");
-
+    
     if (!cleanedText || cleanedText.length < 10) {
       return {
         statusCode: 422,
@@ -414,33 +661,34 @@ exports.handler = async (event, context) => {
 
     // ── Upsert job record (insert new OR reset stale row) ──
     if (cachedJob?.id) {
-      await supabase.from('extractions').update({
-        status: 'processing',
-        document_type: 'unknown',
-        file_name: file.name,
-        estimated_cost: cost,
-        actual_cost: 0,
-        tokens_approx: Math.ceil(cleanedText.length / 4),
-        ocr_text: cleanedText.substring(0, 5000),
-        error_message: null,
-        raw_result: null,
-        updated_at: new Date().toISOString(),
-      }).eq('id', extractionId);
+      await supabase.from('extractions') .update({
+          status: "processing",
+          document_type: "unknown",
+          file_name: file.name,
+          file_type: file.type || validation.mimeType || null,
+          estimated_cost: cost,
+          actual_cost: 0,
+          tokens_approx: Math.ceil(cleanedText.length / 4),
+          error_message: null,
+          raw_result: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", extractionId);
     } else {
-      await supabase.from('extractions').insert({
-        id: extractionId,
-        idempotency_key: idempotencyKey,
-        user_id: userId || null,
-        guest_id: isGuest ? guestId : null,
-        document_type: 'unknown',
-        file_name: file.name,
-        estimated_cost: cost,
-        actual_cost: 0,
-        tokens_approx: Math.ceil(cleanedText.length / 4),
-        status: 'processing',
-        ocr_text: cleanedText.substring(0, 5000),
-        created_at: new Date().toISOString(),
-      });
+    await supabase.from("extractions").insert({
+  id: extractionId,
+  idempotency_key: idempotencyKey,
+  user_id: userId || null,
+  guest_id: isGuest ? guestId : null,
+  document_type: "unknown",
+  file_name: file.name,
+  file_type: file.type || validation.mimeType || null,
+  estimated_cost: cost,
+  actual_cost: 0,
+  tokens_approx: Math.ceil(cleanedText.length / 4),
+  status: "processing",
+  created_at: new Date().toISOString(),
+});
     }
 
     // ── Credit expiration: bonus credits die after 90 days ──
@@ -500,78 +748,98 @@ exports.handler = async (event, context) => {
       docType = (extractedData.document_type || extractedData.category || 'generic').toString().toLowerCase().trim();
       actualCost = calculateActualCost(docType, cleanedText.length);
 
-      // Deduct actual cost (not the estimate) only after success
-      if (!isGuest && userId) {
-        newBalance = currentBalance - actualCost;
-        await supabase.from("profiles").update({ credits_remaining: newBalance }).eq("id", userId);
+     // ------------------------------------------------------------
+// ATOMIC CREDIT CHARGE
+// ------------------------------------------------------------
+//
+// Credits are deducted inside Supabase using a database RPC.
+// The RPC performs the balance check, deduction, transaction
+// logging, and duplicate-charge protection atomically.
+//
+// This means:
+//   • The extraction cannot be charged twice
+//   • The balance cannot be incorrectly overwritten
+//   • Concurrent requests cannot race each other
+//   • A timeout/retry cannot create a second charge
+// ------------------------------------------------------------
 
-        const { data: txData, error: txError } = await supabase
-          .from("credit_transactions")
-          .insert({
-            user_id: userId,
-            amount: -actualCost,
-            type: "extraction",
-            balance_after: newBalance,
-            status: "completed",
-            metadata: {
-              file_name: file.name,
-              estimated_cost: cost,
-              actual_cost: actualCost,
-              document_type: docType,
-              words: cleanedText.split(/\s+/).filter((w) => w.length > 0).length,
-              model: config.ai.provider,
-              chars: cleanedText.length,
-            },
-          })
-          .select("id")
-          .single();
+if (!isGuest && userId) {
+  const words = cleanedText
+    .split(/\s+/)
+    .filter((w) => w.length > 0)
+    .length;
 
-        if (txError) {
-          console.error("Failed to log extraction transaction:", txError);
-        } else {
-          transactionId = txData?.id;
-        }
+  const { data: chargeResult, error: chargeError } =
+    await supabase.rpc("charge_extraction_credits", {
+      p_user_id: userId,
+      p_amount: actualCost,
+      p_extraction_id: extractionId,
+      p_file_name: file.name,
+      p_estimated_cost: cost,
+      p_document_type: docType,
+      p_words: words,
+      p_model: config.ai.provider,
+      p_chars: cleanedText.length,
+    });
 
-        // Refund difference if we over-estimated
-        const refundAmount = Math.round((cost - actualCost) * 10) / 10;
-        if (refundAmount > 0) {
-          const { data: profile } = await supabase
-            .from("profiles")
-            .select("credits_remaining")
-            .eq("id", userId)
-            .single();
+  if (chargeError) {
+    console.error(
+      "Atomic credit charge failed:",
+      chargeError.message
+    );
 
-          const refundedBalance = (profile?.credits_remaining || 0) + refundAmount;
-          await supabase.from("profiles").update({ credits_remaining: refundedBalance }).eq("id", userId);
+    throw new Error(
+      `Credit charge failed: ${chargeError.message}`
+    );
+  }
 
-          await supabase.from("credit_transactions").insert({
-            user_id: userId,
-            amount: refundAmount,
-            type: "refund",
-            balance_after: refundedBalance,
-            status: "completed",
-            metadata: {
-              reason: "actual_cost_lower_than_estimate",
-              estimated: cost,
-              actual: actualCost,
-              file_name: file.name,
-              document_type: docType,
-            },
-          });
+  newBalance = chargeResult?.new_balance ?? null;
 
-          newBalance = refundedBalance;
-        }
+  console.log(
+    `Extraction ${extractionId}: atomic credit charge complete`,
+    {
+      actualCost,
+      newBalance,
+      alreadyCharged:
+        chargeResult?.already_charged || false,
+    }
+  );
+  }
 
-        console.log(`Charged ${actualCost} credits from user ${userId}. Balance: ${newBalance}`);
+
+    extractedData.metadata = {
+  ...(extractedData.metadata || {}),
+   documentFingerprint,
+  extraction: {
+    ...(extractedData.metadata?.extraction || {}),
+    textLength: cleanedText.length,
+    wordCount: cleanedText.split(/\s+/).filter(Boolean).length,
+    finalMethod: extractionMethod,
+  },
+};
+
+
+      const { error: completionSaveError } = await supabase
+        .from("extractions")
+        .update({
+          status: "completed",
+          raw_result: extractedData,
+          document_type: docType,
+          actual_cost: actualCost,
+          error_message: null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", extractionId);
+
+      if (completionSaveError) {
+        throw new Error(
+          `Failed to save completed extraction: ${completionSaveError.message}`
+        );
       }
 
-      // ── Save raw result IMMEDIATELY ──
-      await supabase.from('extractions').update({
-        status: 'completed',
-        raw_result: extractedData,
-        document_type: docType,
-        actual_cost: actualCost,
-      }).eq('id', extractionId);
+      console.log(
+        `Extraction ${extractionId} saved as completed.`
+      );
 
     } catch (aiError) {
       // Mark extraction as failed — credits were NEVER deducted, so nothing to refund
@@ -676,7 +944,10 @@ exports.handler = async (event, context) => {
       headers,
       body: JSON.stringify({
         success: true,
+        status: "completed",
+        jobId: extractionId,
         extractionId,
+
         isGuest,
         fileName: file.name,
         fileType: validation.mimeType,
@@ -697,8 +968,12 @@ exports.handler = async (event, context) => {
             wordCount: cleanedText.split(/\s+/).filter((w) => w.length > 0).length,
             estimatedPages: cost,
           },
-          creditsUsed: isGuest ? 0 : actualCost,
+                    creditsUsed: isGuest ? 0 : actualCost,
           newBalance: isGuest ? null : newBalance,
+
+          // Normal first-time extraction.
+          cached: false,
+          recovered: false,
         },
       }),
     };

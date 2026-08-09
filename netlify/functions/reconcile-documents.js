@@ -67,16 +67,33 @@ exports.handler = async (event, context) => {
   }
 
   
-    const rows = documents.map((d) => ({
-      workspace_id,
-      user_id: userId,
-      document_name: String(d.document_name || "Untitled").slice(0, 255),
-      extracted_fields: d.extracted_fields || {},
-      dataset_side: dataset_side === 'B' ? 'B' : 'A',
-      source_type: d.source_type || 'extracted',
-      status: "unmatched",
-    }));
+        const rows = documents.map((d) => {
+      let extractedFields = d.extracted_fields || {};
+      let docName = String(d.document_name || "Untitled").slice(0, 255);
 
+      // Unwrap nested extracted_fields from extraction pipeline output (any depth)
+      while (
+        extractedFields &&
+        extractedFields.extracted_fields &&
+        typeof extractedFields.extracted_fields === "object" &&
+        !Array.isArray(extractedFields.extracted_fields)
+      ) {
+        docName = String(extractedFields.document_name || docName).slice(0, 255);
+        extractedFields = { ...extractedFields.extracted_fields };
+      }
+
+      return {
+        workspace_id,
+        user_id: userId,
+        document_name: docName,
+        extracted_fields: extractedFields,
+        dataset_side: dataset_side === 'B' ? 'B' : 'A',
+        source_type: d.source_type || 'extracted',
+        status: "unmatched",
+      };
+    });
+
+    
     const { data, error } = await supabase
       .from("reconciliation_documents")
       .insert(rows)

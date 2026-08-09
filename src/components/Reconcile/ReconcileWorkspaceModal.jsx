@@ -111,10 +111,11 @@ function UploadToSideModal({ side, onClose, onUploadCSV }) {
 
 
 export default function ReconcileWorkspaceModal({ workspaceId, onClose }) {
-  const {
+    const {
     currentWorkspace,
     results,
     fetchResults,
+    fetchMatchConfig,
     addDocuments,
     runReconciliation,
     removeDocument,
@@ -165,8 +166,11 @@ export default function ReconcileWorkspaceModal({ workspaceId, onClose }) {
       extracted_fields: normalizeCSVRow(r),
       source_type: files[0]?.name?.toLowerCase()?.endsWith('.json') ? "api" : "csv_row",
     }));
-    await addDocuments(workspaceId, side, docs);
+        await addDocuments(workspaceId, side, docs);
     await fetchResults(workspaceId);
+    // Auto-generate match rules silently so Match Rules modal always has data
+    try { await fetchMatchConfig(workspaceId); } catch {}
+    
   } catch (err) {
     console.error("Upload error:", err);
     alert("Failed to parse file: " + (err.message || "Unknown error"));
@@ -296,8 +300,11 @@ export default function ReconcileWorkspaceModal({ workspaceId, onClose }) {
   <div style={{ maxHeight: "300px", overflowY: "auto" }}>
     {docs.map((doc) => {
       const fields = doc.extracted_fields || {};
-      const preview = Object.entries(fields).slice(0, 3).map(([k, v]) => `${k}: ${String(v).slice(0, 30)}`).join(" | ");
-      const isDeleting = deletingDocId === doc.id;
+         const preview = Object.entries(fields).slice(0, 3).map(([k, v]) => {
+        const display = typeof v === "object" && v !== null ? JSON.stringify(v) : String(v);
+        return `${k}: ${display.slice(0, 30)}`;
+      }).join(" | ");
+       const isDeleting = deletingDocId === doc.id;
       return (
         <div key={doc.id} style={{ padding: "10px 12px", borderBottom: "1px solid #f1f5f9", fontSize: "13px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", opacity: isDeleting ? 0.5 : 1 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -495,11 +502,6 @@ export default function ReconcileWorkspaceModal({ workspaceId, onClose }) {
         <div style={{ overflowY: "auto", flex: 1, padding: "16px 24px" }}>
           {activeTab === "side_a" && renderDocList(sideADocs, "Side A")}
           {activeTab === "side_b" && renderDocList(sideBDocs, "Side B")}
-
-                  <div style={{ overflowY: "auto", flex: 1, padding: "16px 24px" }}>
-          {activeTab === "side_a" && renderDocList(sideADocs, "Side A")}
-          {activeTab === "side_b" && renderDocList(sideBDocs, "Side B")}
-
           {activeTab === "unmatched" && (
             <div style={{ maxHeight: "500px", overflowY: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
@@ -576,8 +578,7 @@ export default function ReconcileWorkspaceModal({ workspaceId, onClose }) {
                 </div>
               )}
             </div>
-          )}
-        </div>
+         )}
         </div>
       </div>
 
