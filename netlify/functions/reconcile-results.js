@@ -41,7 +41,7 @@ exports.handler = async (event, context) => {
 
   const { data: ws } = await supabase
     .from("reconciliation_workspaces")
-    .select("*")
+    .select("*, last_rejected_candidates")
     .eq("id", workspace_id)
     .eq("user_id", userId)
     .single();
@@ -54,9 +54,13 @@ exports.handler = async (event, context) => {
   if (status) docQuery = docQuery.eq("status", status);
   if (side) docQuery = docQuery.eq("dataset_side", side);
 
-  const [{ data: documents }, { data: matches }] = await Promise.all([
-    docQuery.order("created_at", { ascending: true }).limit(docLimit),
-    supabase.from("reconciliation_matches").select("*").eq("workspace_id", workspace_id).limit(docLimit),
-  ]);
-  return ok({ workspace: ws, documents: documents || [], matches: matches || [] });
+      try {
+    const [{ data: documents }, { data: matches }] = await Promise.all([
+      docQuery.order("created_at", { ascending: true }).limit(docLimit),
+      supabase.from("reconciliation_matches").select("*").eq("workspace_id", workspace_id).limit(docLimit),
+    ]);
+    return ok({ workspace: ws, documents: documents || [], matches: matches || [] });
+  } catch (e) {
+    return err(500, "Failed to fetch results", { detail: e.message });
+  }
 };

@@ -35,22 +35,30 @@ export default function MatchConfigModal({ workspaceId, onClose, onConfigured })
     onConfigured?.();
   };
 
-  const updateRule = (idx, updates) => {
+    const updateRule = (idx, updates) => {
     setConfig((prev) => ({
       ...prev,
-      rules: (prev.rules || []).map((r, i) => (i === idx ? { ...r, ...updates } : r)),
+      rules: (prev.rules || []).map((r, i) => {
+        if (i !== idx) return r;
+        const next = { ...r, ...updates };
+        if (next.side_a_field && !next.canonical) {
+          next.canonical = String(next.side_a_field).toLowerCase().trim().replace(/\s+/g, "_");
+        }
+        return next;
+      }),
     }));
   };
 
-  const addRule = () => {
+    const addRule = () => {
     setConfig((prev) => ({
       ...prev,
       rules: [
         ...(prev.rules || []),
-        { side_a_field: "", side_b_field: "", type: "text", weight: 0.2, strategy: "fuzzy" },
+        { side_a_field: "", side_b_field: "", canonical: "", type: "text", weight: 0.2, strategy: "fuzzy" },
       ],
     }));
   };
+
 
   const removeRule = (idx) => {
     setConfig((prev) => ({

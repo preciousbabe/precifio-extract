@@ -15,7 +15,8 @@ async function api(path, opts = {}) {
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const err = new Error(data.error || "Request failed");
+    const msg = typeof data.error === "string" ? data.error : (data.error?.message || data.error?.error || JSON.stringify(data.error) || "Request failed");
+    const err = new Error(msg);
     err.code = data.code || null;
     err.status = res.status;
     throw err;
@@ -68,6 +69,12 @@ export const reconcileService = {
     if (side) params.append("side", side);
     return api(`/reconcile-results?${params.toString()}`);
   },
+
+    exportWorkspace: (workspace_id, format = "excel") =>
+    api("/reconcile-export", {
+      method: "POST",
+      body: JSON.stringify({ workspace_id, format }),
+    }),
 
   getFieldAliases: () => api("/reconcile-field-aliases"),
   saveFieldAlias: (payload) =>

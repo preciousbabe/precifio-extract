@@ -1,5 +1,6 @@
 // netlify/functions/reconcile-configure.js
 const { createClient } = require("@supabase/supabase-js");
+const core = require("./lib/reconcile-core");
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -246,6 +247,10 @@ exports.handler = async (event, context) => {
       .eq("user_id", userId)
       .single();
     if (!ws) return err(404, "Workspace not found");
+
+    // ─── NEW: Config validation before saving ───
+    const configValid = core.validateConfig(configuration);
+    if (!configValid.valid) return err(400, "Invalid configuration: " + configValid.error);
 
     configuration.auto_generated = false;
     configuration.updated_at = new Date().toISOString();

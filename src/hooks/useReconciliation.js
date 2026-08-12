@@ -100,6 +100,11 @@ export function useReconciliation() {
     return data;
   }, []);
 
+    const exportWorkspace = useCallback(async (workspace_id, format = "excel") => {
+    const data = await withLoading(() => reconcileService.exportWorkspace(workspace_id, format));
+    return data;
+  }, []);
+
   return {
     loading,
     error,
@@ -118,6 +123,7 @@ export function useReconciliation() {
     saveMatchConfig,
     runReconciliation,
     fetchResults,
+    exportWorkspace,
     fetchFieldAliases,
     saveFieldAlias,
     deleteFieldAlias,

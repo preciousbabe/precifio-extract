@@ -509,6 +509,7 @@ function ExportDropdown({ item, segments, onExport, user, disabled, config }) {
     })(),
   };
 
+  
   const handleExport = async (format) => {
     if (disabled) return;
     setExporting(format);
@@ -583,10 +584,17 @@ function ExportDropdown({ item, segments, onExport, user, disabled, config }) {
           setTimeout(() => setCopied(false), 2000);
           break;
 
-        case "reconcile":
-          setShowConsent(true);
-          setOpen(false);
-          break;
+       case "reconcile":
+       if (!user) {
+         window.dispatchEvent(
+           new CustomEvent("showAuthModal", { detail: { mode: "signup" } })
+         );
+         setOpen(false);
+         return;
+       }
+       setShowConsent(true);
+       setOpen(false);
+       break;
 
         default:
           console.warn("Unknown export format:", format);

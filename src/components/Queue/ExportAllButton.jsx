@@ -1,6 +1,7 @@
 // src/components/Queue/ExportAllButton.jsx
 import React, { useState, useRef, useEffect } from "react";
 import { downloadExport } from "../../utils/export-utils";
+import { useAuth } from "../../hooks/useAuth";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
 import ReconcileConsentModal from "../Reconcile/ReconcileConsentModal";
@@ -32,7 +33,7 @@ export default function ExportAllButton({ items, config = {} }) {
   const [open, setOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const menuRef = useRef(null);
-
+  const { isGuest } = useAuth();
   const [showConsent, setShowConsent] = useState(false);
   const [showWorkspacePicker, setShowWorkspacePicker] = useState(false);
   const [showWorkspace, setShowWorkspace] = useState(false);
@@ -72,11 +73,18 @@ export default function ExportAllButton({ items, config = {} }) {
     setExporting(true);
     setOpen(false);
 
-    if (format === "reconcile") {
-      setShowConsent(true);
-      setExporting(false);
-      return;
-    }
+   if (format === "reconcile") {
+  if (isGuest) {
+    window.dispatchEvent(
+      new CustomEvent("showAuthModal", { detail: { mode: "signup" } })
+    );
+    setExporting(false);
+    return;
+  }
+  setShowConsent(true);
+  setExporting(false);
+  return;
+}
 
     if (successfulItems.length === 0) {
       alert("No successfully extracted documents to export.");

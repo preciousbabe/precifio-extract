@@ -1,4 +1,4 @@
-// netlify/functions/reconcile-run.js
+// netlify/functions/reconcile-process-queue.js
 const { createClient } = require("@supabase/supabase-js");
 const core = require("./lib/reconcile-core");
 
@@ -6,17 +6,6 @@ const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
-
-const IS_PROD = process.env.NODE_ENV === "production";
-
-function log(level, event, meta = {}) {
-  if (IS_PROD && level === "debug") return;
-  const entry = { level, event, timestamp: new Date().toISOString(), ...meta };
-  const line = JSON.stringify(entry);
-  if (level === "error") console.error(line);
-  else if (level === "warn") console.warn(line);
-  else console.log(line);
-}
 
 const CORS = {
   "Access-Control-Allow-Origin": process.env.CORS_ORIGIN || "*",
@@ -52,13 +41,6 @@ async function getUser(event) {
   return data.user;
 }
 
-function validateUUID(v, name) {
-  if (!v || typeof v !== "string") return { valid: false, error: `${name} is required` };
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v))
-    return { valid: false, error: `${name} must be a valid UUID` };
-  return { valid: true };
-}
-
 async function resolveFieldAliases(userId) {
   const { data } = await supabase
     .from("reconciliation_field_aliases")
@@ -84,65 +66,38 @@ exports.handler = async (event, context) => {
   try {
     const auth = await getUser(event);
     const userId = auth.id;
+    const body = JSON.parse(event.body || "{}");
 
-    let body;
-    try {
-      body = JSON.parse(event.body || "{}");
-    } catch (parseErr) {
-      return err(400, "INVALID_JSON", "Invalid JSON body");
+    // Find the oldest queued run for this user
+    let runQuery = supabase
+      .from("reconciliation_runs")
+      .select("*, workspace:workspace_id(*)")
+      .eq("status", "queued")
+      .order("created_at", { ascending: true });
+
+    if (body.run_id) {
+      runQuery = runQuery.eq("id", body.run_id);
     }
 
-    workspace_id = body.workspace_id;
-    const uuidCheck = validateUUID(workspace_id, "workspace_id");
-    if (!uuidCheck.valid) return err(400, "VALIDATION_ERROR", uuidCheck.error);
+    const { data: runRecord, error: runErr } = await runQuery.limit(1).single();
 
+    if (runErr || !runRecord) {
+      return ok({ message: "No queued jobs found", processed: false });
+    }
+
+    workspace_id = runRecord.workspace_id;
+
+    // Verify ownership
     const { data: ws } = await supabase
       .from("reconciliation_workspaces")
       .select("*")
       .eq("id", workspace_id)
       .eq("user_id", userId)
       .single();
+
     if (!ws) return err(404, "NOT_FOUND", "Workspace not found");
 
-    // ─── RATE LIMITING: max 1 run per workspace per 10 seconds ───
-    const { data: recentRun } = await supabase
-      .from("reconciliation_runs")
-      .select("created_at")
-      .eq("workspace_id", workspace_id)
-      .in("status", ["running", "queued", "completed"])
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .single();
-
-    if (recentRun) {
-      const secondsSince = (Date.now() - new Date(recentRun.created_at).getTime()) / 1000;
-      if (secondsSince < 10) {
-        return err(429, "RATE_LIMITED", "Maximum 1 run per 10 seconds. Please wait.");
-      }
-    }
-
-    // Idempotency: check for recent run
-    const idempotencyKey = body.idempotency_key;
-    if (idempotencyKey) {
-      const { data: existingRun } = await supabase
-        .from("reconciliation_runs")
-        .select("id, status, created_at")
-        .eq("workspace_id", workspace_id)
-        .eq("idempotency_key", idempotencyKey)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .single();
-
-      if (existingRun) {
-        const ageMinutes = (Date.now() - new Date(existingRun.created_at).getTime()) / 60000;
-        if (ageMinutes < 30) {
-          log("info", "idempotent_return", { runId: existingRun.id, ageMinutes });
-          return ok({ success: true, idempotent: true, run_id: existingRun.id });
-        }
-      }
-    }
-
-    // Lock workspace using dedicated is_processing flag with timeout recovery
+    // Lock workspace
     const lockTimeout = new Date(Date.now() - 5 * 60 * 1000).toISOString();
     const { data: lockData, error: lockErr } = await supabase
       .from("reconciliation_workspaces")
@@ -154,22 +109,11 @@ exports.handler = async (event, context) => {
       .single();
 
     if (lockErr || !lockData) {
-      log("warn", "workspace_lock_failed", { workspace_id, error: lockErr?.message });
-      return err(409, "ALREADY_PROCESSING", "Workspace is already processing or lock could not be acquired");
+      return err(409, "ALREADY_PROCESSING", "Workspace is locked by another process");
     }
     workspaceLocked = true;
 
-    // Record run start
-    const { data: runRecord } = await supabase
-      .from("reconciliation_runs")
-      .insert({
-        workspace_id,
-        user_id: userId,
-        idempotency_key: idempotencyKey || null,
-        status: "running",
-      })
-      .select()
-      .single();
+    await supabase.from("reconciliation_runs").update({ status: "running" }).eq("id", runRecord.id);
 
     // Clear old matches and reset statuses
     await supabase.from("reconciliation_matches").delete().eq("workspace_id", workspace_id);
@@ -178,7 +122,7 @@ exports.handler = async (event, context) => {
       .update({ status: "unmatched", match_score: null })
       .eq("workspace_id", workspace_id);
 
-    // Fetch both sides
+        // Fetch docs
     const { data: sideA } = await supabase
       .from("reconciliation_documents")
       .select("*")
@@ -190,7 +134,6 @@ exports.handler = async (event, context) => {
       .eq("workspace_id", workspace_id)
       .eq("dataset_side", "B");
 
-    // Normalize nested extracted_fields
     const normalizeDoc = (doc) => {
       let fields = doc.extracted_fields || {};
       let name = doc.document_name;
@@ -208,24 +151,10 @@ exports.handler = async (event, context) => {
     const normalizedSideA = (sideA || []).map(normalizeDoc);
     const normalizedSideB = (sideB || []).map(normalizeDoc);
 
-    // ─── BACKGROUND QUEUE: >500 documents per side ───
-    if (normalizedSideA.length > 500 || normalizedSideB.length > 500) {
-      await supabase.from("reconciliation_runs").update({ status: "queued" }).eq("id", runRecord.id);
-      await supabase.from("reconciliation_workspaces").update({ is_processing: false, processing_started_at: null }).eq("id", workspace_id);
-      workspaceLocked = false;
-      return ok({ queued: true, message: "Large dataset queued for background processing", run_id: runRecord.id });
-    }
-
-        if (!sideA?.length || !sideB?.length) {
-      await supabase.from("reconciliation_workspaces").update({ 
-        status: "completed", 
-        summary: ws.summary, 
-        is_processing: false, 
-        processing_started_at: null,
-        last_rejected_candidates: null
-      }).eq("id", workspace_id);
+    if (!normalizedSideA.length || !normalizedSideB.length) {
+      await supabase.from("reconciliation_workspaces").update({ status: "completed", is_processing: false, processing_started_at: null }).eq("id", workspace_id);
       await supabase.from("reconciliation_runs").update({ status: "completed", completed_at: new Date().toISOString() }).eq("id", runRecord.id);
-      return ok({ message: "Both sides need data to reconcile", summary: ws.summary });
+      return ok({ message: "Both sides need data to reconcile", summary: ws.summary, processed: true });
     }
 
     // Get or generate config
@@ -238,34 +167,22 @@ exports.handler = async (event, context) => {
 
       const configValid = core.validateConfig(config);
       if (!configValid.valid) {
-        log("error", "auto_config_invalid", { error: configValid.error });
         throw new ReconciliationError("CONFIG_ERROR", configValid.error);
       }
-
       await supabase.from("reconciliation_workspaces").update({ match_configuration: config }).eq("id", workspace_id);
     }
-
-    log("info", "reconcile_start", {
-      workspace_id,
-      run_id: runRecord.id,
-      sideACount: normalizedSideA.length,
-      sideBCount: normalizedSideB.length,
-      ruleCount: config.rules.length,
-      sumMatching: config.sum_matching?.enabled,
-    });
 
     const { matches, docAMatched, docBMatched, rejectedCandidates } = core.findMatches(
       normalizedSideA,
       normalizedSideB,
       config.rules || [],
       config.sum_matching || {},
-      log
+      () => {} // silent logger for queue
     );
 
-    // ─── OPTIONAL: OpenAI narrative enhancement ───
+    // Optional OpenAI narrative enhancement
     const openaiKey = process.env.OPENAI_API_KEY;
-    const shouldGenerateNarrative = body.generate_narrative !== false;
-    if (openaiKey && shouldGenerateNarrative) {
+    if (openaiKey) {
       for (const m of matches) {
         if (m.investigative_report) {
           m.investigative_report = await core.enhanceReportWithOpenAI(m.investigative_report, openaiKey);
@@ -273,15 +190,7 @@ exports.handler = async (event, context) => {
       }
     }
 
-    log("info", "reconcile_complete", {
-      workspace_id,
-      run_id: runRecord.id,
-      matches: matches.length,
-      unmatchedA: normalizedSideA.filter(d => !docAMatched.has(d.id)).length,
-      unmatchedB: normalizedSideB.filter(d => !docBMatched.has(d.id)).length,
-    });
-
-    // Write matches with snapshots and investigative reports
+    // Write matches
     const docAMap = new Map(normalizedSideA.map(d => [d.id, d]));
     const docBMap = new Map(normalizedSideB.map(d => [d.id, d]));
 
@@ -301,15 +210,11 @@ exports.handler = async (event, context) => {
         document_b_snapshot: docBMap.get(m.docB_id)?.extracted_fields || null,
         investigative_report: m.investigative_report || null,
       }));
-
       const { error: insErr } = await supabase.from("reconciliation_matches").insert(inserts);
-      if (insErr) {
-        log("error", "match_insert_failed", { error: insErr.message });
-        throw new ReconciliationError("INSERT_ERROR", "Failed to save match results: " + insErr.message);
-      }
+      if (insErr) throw new ReconciliationError("INSERT_ERROR", "Failed to save matches: " + insErr.message);
     }
 
-    // Update document statuses (bulk)
+    // Bulk update document statuses
     const aStatusMap = new Map();
     const bStatusMap = new Map();
     for (const m of matches) {
@@ -321,23 +226,14 @@ exports.handler = async (event, context) => {
         bStatusMap.set(m.docB_id, { status: st, score: m.score });
       }
     }
-
     const updateGroups = new Map();
     for (const [id, val] of [...aStatusMap, ...bStatusMap]) {
       const key = `${val.status}:${val.score}`;
       if (!updateGroups.has(key)) updateGroups.set(key, { status: val.status, score: val.score, ids: [] });
       updateGroups.get(key).ids.push(id);
     }
-
     for (const group of updateGroups.values()) {
-      const { error: upErr } = await supabase
-        .from("reconciliation_documents")
-        .update({ status: group.status, match_score: group.score })
-        .in("id", group.ids);
-      if (upErr) {
-        log("error", "bulk_doc_update_failed", { error: upErr.message });
-        throw new ReconciliationError("UPDATE_ERROR", "Failed to update document statuses: " + upErr.message);
-      }
+      await supabase.from("reconciliation_documents").update({ status: group.status, match_score: group.score }).in("id", group.ids);
     }
 
     // Summary
@@ -351,44 +247,20 @@ exports.handler = async (event, context) => {
       total: aDocs.length,
     };
 
-        await supabase.from("reconciliation_workspaces").update({ status: "completed", summary, is_processing: false, processing_started_at: null, last_rejected_candidates: rejectedCandidates.length > 0 ? rejectedCandidates : null }).eq("id", workspace_id);
+    await supabase.from("reconciliation_workspaces").update({ status: "completed", summary, is_processing: false, processing_started_at: null }).eq("id", workspace_id);
     await supabase.from("reconciliation_runs").update({ status: "completed", completed_at: new Date().toISOString() }).eq("id", runRecord.id);
 
-    return ok({
-      success: true,
-      run_id: runRecord.id,
-      summary,
-      matches_created: matches.length,
-      configuration: config,
-      rejected_candidates: rejectedCandidates.map(rc => ({
-        document_id: rc.doc_id,
-        document_side: rc.doc_side,
-        best_candidate_id: rc.candidate_id,
-        best_candidate_side: rc.candidate_side,
-        score: rc.score,
-        reason: rc.reason,
-        gate_failures: rc.gate_failures,
-        warnings: rc.warnings,
-      })),
-    });
+    return ok({ success: true, run_id: runRecord.id, summary, matches_created: matches.length, processed: true });
 
   } catch (e) {
-    log("error", "reconcile_run_error", {
-      workspace_id,
-      error: e.message,
-      code: e.code || "UNKNOWN",
-      stack: IS_PROD ? undefined : e.stack,
-    });
-
     if (workspaceLocked && workspace_id) {
       await supabase.from("reconciliation_workspaces").update({ status: "error", is_processing: false, processing_started_at: null }).eq("id", workspace_id);
-      await supabase.from("reconciliation_runs").update({ status: "failed", error_message: e.message, completed_at: new Date().toISOString() }).eq("workspace_id", workspace_id).eq("status", "running");
+      await supabase.from("reconciliation_runs").update({ status: "failed", error_message: e.message, completed_at: new Date().toISOString() }).eq("id", runRecord.id);
     }
-
     if (e instanceof ReconciliationError) {
       return err(e.recoverable ? 400 : 500, e.code, e.message);
     }
-    return err(500, "INTERNAL_ERROR", e.message || "Internal error during reconciliation");
+    return err(500, "INTERNAL_ERROR", e.message);
   } finally {
     if (workspaceLocked && workspace_id) {
       await supabase.from("reconciliation_workspaces").update({ is_processing: false, processing_started_at: null }).eq("id", workspace_id);
