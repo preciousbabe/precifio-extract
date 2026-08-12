@@ -435,15 +435,94 @@ export default function ReconcileWorkspaceModal({ workspaceId, onClose }) {
           <div style={{ overflowY: "auto", flex: 1, padding: "16px 24px" }}>
             {activeTab === "side_a" && renderDocList(sideADocs, "Side A")}
             {activeTab === "side_b" && renderDocList(sideBDocs, "Side B")}
+
             {activeTab === "unmatched" && (
               <div style={{ maxHeight: "500px", overflowY: "auto" }}>
-                ...
+                {(results?.documents || []).filter(d => d.status === "unmatched").length === 0 ? (
+                  <div style={{ textAlign: "center", padding: "40px", color: "#94a3b8", fontSize: "13px" }}>
+                    No unmatched documents.
+                  </div>
+                ) : (
+                  (results?.documents || [])
+                    .filter(d => d.status === "unmatched")
+                    .map(doc => {
+                      const fields = doc.extracted_fields || {};
+                      const preview = Object.entries(fields).slice(0, 3).map(([k, v]) => {
+                        const display = typeof v === "object" && v !== null ? JSON.stringify(v) : String(v);
+                        return `${k}: ${display.slice(0, 30)}`;
+                      }).join(" | ");
+                      return (
+                        <div key={doc.id} style={{ padding: "10px 12px", borderBottom: "1px solid #f1f5f9", fontSize: "13px" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <div>
+                              <div style={{ fontWeight: 600, color: "#1e293b", marginBottom: "2px" }}>{doc.document_name}</div>
+                              <div style={{ color: "#64748b", fontSize: "12px" }}>{preview}</div>
+                            </div>
+                            <span style={{
+                              fontSize: "11px", padding: "2px 8px", borderRadius: "4px",
+                              background: "#f3f4f6", color: "#6b7280", fontWeight: 500
+                            }}>
+                              {doc.dataset_side === "A" ? "Side A" : "Side B"}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })
+                )}
               </div>
             )}
 
             {["matched", "partial", "review"].includes(activeTab) && (
               <div style={{ maxHeight: "500px", overflowY: "auto" }}>
-                ...
+                {(results?.matches || []).filter(m => m.status === activeTab).length === 0 ? (
+                  <div style={{ textAlign: "center", padding: "40px", color: "#94a3b8", fontSize: "13px" }}>
+                    No {activeTab} results found.
+                  </div>
+                ) : (
+                  (results?.matches || [])
+                    .filter(m => m.status === activeTab)
+                    .map(m => {
+                      const docA = sideADocs.find(d => d.id === m.document_id);
+                      const docB = sideBDocs.find(d => d.id === m.document_b_id);
+                      return (
+                        <div
+                          key={m.id}
+                          onClick={() => m.investigative_report && setActiveReport(m.investigative_report)}
+                          style={{
+                            padding: "12px", borderBottom: "1px solid #f1f5f9",
+                            cursor: m.investigative_report ? "pointer" : "default"
+                          }}
+                        >
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                            <span style={{ fontSize: "13px", fontWeight: 600, color: "#1e293b" }}>
+                              {docA?.document_name || "—"} ↔ {docB?.document_name || "—"}
+                            </span>
+                            <span style={{
+                              fontSize: "11px", padding: "2px 10px", borderRadius: "999px", fontWeight: 600,
+                              background: activeTab === "matched" ? "#dcfce7" : activeTab === "review" ? "#fef3c7" : "#e0e7ff",
+                              color: activeTab === "matched" ? "#166534" : activeTab === "review" ? "#92400e" : "#3730a3"
+                            }}>
+                              {m.match_score != null ? `${m.match_score}%` : activeTab}
+                            </span>
+                          </div>
+                          {m.match_type && m.match_type !== activeTab && (
+                            <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "4px" }}>
+                              Type: {m.match_type}
+                            </div>
+                          )}
+                          {m.gate_failures?.length > 0 && (
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
+                              {m.gate_failures.map((gf, i) => (
+                                <span key={i} style={{ fontSize: "11px", padding: "2px 8px", borderRadius: "4px", background: "#fee2e2", color: "#991b1b" }}>
+                                  {gf}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                )}
               </div>
             )}
 
