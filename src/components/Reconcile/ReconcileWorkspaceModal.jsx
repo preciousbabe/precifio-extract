@@ -163,11 +163,23 @@ export default function ReconcileWorkspaceModal({ workspaceId, onClose }) {
         alert("Files appear empty or could not be parsed.");
         return;
       }
-      const docs = allRows.map((r, i) => ({
-        document_name: `Row ${i + 1}`,
-        extracted_fields: normalizeCSVRow(r),
-        source_type: files[0]?.name?.toLowerCase()?.endsWith('.json') ? "api" : "csv_row",
-      }));
+     const docs = allRows.map((r, i) => {
+  const normalized = normalizeCSVRow(r);
+  // Try to find a meaningful name: invoice_number, reference, description, or fallback to Row N
+  const name = normalized.invoice_number 
+    || normalized.reference 
+    || normalized.invoice 
+    || normalized.inv 
+    || normalized.description 
+    || normalized.payee 
+    || normalized.vendor
+    || `Row ${i + 1}`;
+  return {
+    document_name: String(name).slice(0, 100),
+    extracted_fields: normalized,
+    source_type: files[0]?.name?.toLowerCase()?.endsWith('.json') ? "api" : "csv_row",
+  };
+});
       await addDocuments(workspaceId, side, docs);
       await fetchResults(workspaceId);
       try { await fetchMatchConfig(workspaceId); } catch {}
@@ -665,3 +677,4 @@ export default function ReconcileWorkspaceModal({ workspaceId, onClose }) {
 
   return createPortal(overlay, document.body);
 }
+

@@ -191,7 +191,7 @@ exports.handler = async (event, context) => {
       .eq("dataset_side", "B");
 
     // Normalize nested extracted_fields
-    const normalizeDoc = (doc) => {
+        const normalizeDoc = (doc) => {
       let fields = doc.extracted_fields || {};
       let name = doc.document_name;
       while (
@@ -203,6 +203,14 @@ exports.handler = async (event, context) => {
         name = fields.document_name || name;
         fields = { ...fields.extracted_fields };
       }
+      
+      // Fix 5: Extract embedded references from all text fields
+      const allText = Object.values(fields).filter(v => typeof v === "string" && v.length > 3).join(" ");
+      const extractedRefs = core.extractEmbeddedReferences(allText);
+      if (extractedRefs.length > 0) {
+        fields.__extracted_refs = extractedRefs;
+      }
+      
       return { ...doc, document_name: name, extracted_fields: fields };
     };
     const normalizedSideA = (sideA || []).map(normalizeDoc);
@@ -254,7 +262,7 @@ exports.handler = async (event, context) => {
       sumMatching: config.sum_matching?.enabled,
     });
 
-    const { matches, docAMatched, docBMatched, rejectedCandidates } = core.findMatches(
+      const { matches, docAMatched, docBMatched, rejectedCandidates, unmatchedReports } = core.findMatches(
       normalizedSideA,
       normalizedSideB,
       config.rules || [],
@@ -337,6 +345,14 @@ exports.handler = async (event, context) => {
       if (upErr) {
         log("error", "bulk_doc_update_failed", { error: upErr.message });
         throw new ReconciliationError("UPDATE_ERROR", "Failed to update document statuses: " + upErr.message);
+      }
+    }
+
+    if (unmatchedReports?.length > 0) {
+      for (const u of unmatchedReports) {
+        await supabase.from("reconciliation_documents")
+          .update({ unmatched_analysis: u.report })
+          .eq("id", u.docId);
       }
     }
 

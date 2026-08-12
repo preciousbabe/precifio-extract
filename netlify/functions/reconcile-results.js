@@ -64,3 +64,4 @@ exports.handler = async (event, context) => {
     return err(500, "Failed to fetch results", { detail: e.message });
   }
 };
+

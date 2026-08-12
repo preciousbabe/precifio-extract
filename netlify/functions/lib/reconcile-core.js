@@ -71,6 +71,36 @@ function normalize(s) {
   return String(s || "").toLowerCase().replace(/[^\w\s]/g, "").trim();
 }
 
+// ─── Fix 1: Reference containment for split matching ─────────────────────
+function refMatchesTarget(targetRef, itemRef) {
+  if (!targetRef || !itemRef) return false;
+  const t = normalize(targetRef);
+  const i = normalize(itemRef);
+  return t.includes(i) || i.includes(t) || similarity(t, i) >= 0.9;
+}
+
+// ─── Fix 5: Extract invoice/PO/check numbers from payment memos ──────────
+function extractEmbeddedReferences(text) {
+  if (!text) return [];
+  const raw = String(text);
+  const patterns = [
+    /\b(inv|invoice)[\s#-]*(\d+)\b/gi,
+    /\b(po|purchase\s*order)[\s#-]*(\d+)\b/gi,
+    /\b(check|cheque)[\s#-]*(\d+)\b/gi,
+    /\b(ref|reference)[\s#-]*(\d+)\b/gi,
+    /\b(txn|transaction)[\s#-]*(\d+)\b/gi,
+  ];
+  const refs = new Set();
+  for (const regex of patterns) {
+    let match;
+    while ((match = regex.exec(raw)) !== null) {
+      refs.add(normalize(match[0]));
+    }
+  }
+  return Array.from(refs);
+}
+
+
 function parseDate(v) {
   if (!v) return null;
   const str = String(v).trim();
@@ -444,29 +474,40 @@ function classifyMatch(score, gateScore, gateFailures, warnings, allGatesPresent
   if (gateFailures.some(g => g.includes("currency"))) {
     return { type: "currency_mismatch", status: "unmatched", confidence: "none" };
   }
+
   const amountFailed = gateFailures.some(g => g.includes("amount"));
-  const referenceFailed = gateFailures.some(g => g.includes("reference"));
+  const referenceMismatch = gateFailures.some(g => g.includes("reference_mismatch"));
+  const referenceMissing = gateFailures.some(g => g.includes("reference_missing") || g.includes("reference_invalid") || g.includes("reference_empty"));
   const hasDateWarning = warnings.some(w => w.includes("date_sequence"));
+
+  // Fix 4: Reference mismatch is a hard stop unless score is near-perfect
+  if (referenceMismatch && score < 95) {
+    return { type: "wrong_reference", status: "unmatched", confidence: "none" };
+  }
+  if (referenceMismatch && amountFailed) {
+    return { type: "complete_mismatch", status: "unmatched", confidence: "none" };
+  }
 
   if (gateScore === 100 && allGatesPresent && !hasDateWarning && gateFailures.length === 0) {
     return { type: "exact", status: "matched", confidence: "high" };
   }
-  if (score >= 90 && !amountFailed && !referenceFailed && !hasDateWarning && gateFailures.length === 0) {
+  if (score >= 90 && !amountFailed && !referenceMismatch && !hasDateWarning && gateFailures.length === 0) {
     return { type: "matched", status: "matched", confidence: "high" };
   }
   if (score >= 60) {
     if (hasDateWarning && amountFailed) return { type: "amount_and_date_anomaly", status: "review", confidence: "medium" };
     if (hasDateWarning) return { type: "date_anomaly", status: "review", confidence: "medium" };
     if (amountFailed) return { type: "amount_variance", status: "review", confidence: "medium" };
-    if (referenceFailed) return { type: "reference_mismatch", status: "review", confidence: "medium" };
+    if (referenceMissing) return { type: "reference_missing", status: "review", confidence: "medium" };
     return { type: "review", status: "review", confidence: "medium" };
   }
-  if (score >= 40 && amountFailed && !referenceFailed && !hasDateWarning) {
+  if (score >= 40 && amountFailed && !referenceMismatch && !hasDateWarning) {
     return { type: "amount_variance", status: "review", confidence: "low" };
   }
   if (score >= 40) return { type: "partial", status: "partial", confidence: "low" };
   return { type: "unmatched", status: "unmatched", confidence: "none" };
 }
+
 
 function buildInvestigativeReport(docA, docB, scoreResult, rules, classification) {
   const report = {
@@ -682,6 +723,106 @@ function buildInvestigativeReport(docA, docB, scoreResult, rules, classification
   return report;
 }
 
+
+function buildUnmatchedReport(doc, topCandidates, rules, side) {
+  const report = {
+    verdict: "unmatched",
+    confidence: "none",
+    match_type: "unmatched",
+    summary_narrative: "No suitable match found.",
+    deterministic_analysis: {},
+    investigative_notes: [],
+    candidate_analysis: [],
+    evidence_references: {
+      document: { id: doc.id, name: doc.document_name, snapshot: doc.extracted_fields },
+      rules_applied: rules.map(r => ({
+        canonical: r.canonical,
+        side_a_field: r.side_a_field,
+        side_b_field: r.side_b_field,
+        weight: r.weight,
+        strategy: r.strategy,
+        is_gate: r.is_gate,
+      })),
+    },
+  };
+
+  const amountRule = rules.find(r => r.type === "numeric" && /amount|total|sum|payment|paid|due/.test(r.canonical || r.side_a_field || ""));
+  if (amountRule) {
+    const val = doc.extracted_fields?.[side === "A" ? amountRule.side_a_field : amountRule.side_b_field];
+    const money = parseMoney(val);
+    report.deterministic_analysis.amount = {
+      raw: val,
+      parsed: money ? money.formatted : null,
+      cents: money ? money.cents : null,
+    };
+  }
+
+  const refRule = rules.find(r => r.type === "reference" && r.is_gate);
+  if (refRule) {
+    const val = doc.extracted_fields?.[side === "A" ? refRule.side_a_field : refRule.side_b_field];
+    report.deterministic_analysis.reference = {
+      raw: val,
+      normalized: normalize(val),
+    };
+  }
+
+  const dateRule = rules.find(r => r.type === "date");
+  if (dateRule) {
+    const val = doc.extracted_fields?.[side === "A" ? dateRule.side_a_field : dateRule.side_b_field];
+    const d = parseDate(val);
+    report.deterministic_analysis.date = {
+      raw: val,
+      parsed: d ? d.toISOString() : null,
+    };
+  }
+
+  if (topCandidates.length === 0) {
+    report.summary_narrative = "No candidates found on the opposite side. Verify the other dataset was uploaded correctly.";
+    report.investigative_notes.push({
+      type: "no_candidates",
+      severity: "high",
+      narrative: "This document had no potential matches. It may be missing from the other dataset, or key fields may not have been extracted.",
+      suggested_actions: ["Verify the corresponding document exists on the other side", "Check field extraction quality", "Confirm date ranges overlap"],
+    });
+  } else {
+    const best = topCandidates[0];
+    const bestScore = best.score;
+    const bestDoc = best.doc;
+    report.summary_narrative = `Best candidate score: ${bestScore}%. No match met the minimum threshold.`;
+
+    topCandidates.forEach((cand, idx) => {
+      const classification = classifyMatch(cand.score, cand.result.gateScore, cand.result.gateFailures, cand.result.warnings, cand.result.allGatesPresent);
+      report.candidate_analysis.push({
+        rank: idx + 1,
+        document_name: cand.doc.document_name,
+        document_id: cand.doc.id,
+        score: cand.score,
+        gate_score: cand.result.gateScore,
+        status: classification.status,
+        type: classification.type,
+        gate_failures: cand.result.gateFailures,
+        warnings: cand.result.warnings,
+        already_matched_to_other: cand.alreadyMatched || false,
+        why: classification.type,
+      });
+    });
+
+    const bestClassification = classifyMatch(bestScore, best.result.gateScore, best.result.gateFailures, best.result.warnings, best.result.allGatesPresent);
+    const note = {
+      type: "no_match_found",
+      severity: bestScore >= 50 ? "medium" : "high",
+      narrative: `This document could not be matched. Best candidate: ${bestDoc.document_name} (score: ${bestScore}%, type: ${bestClassification.type}).`,
+      suggested_actions: ["Verify if payment is pending", "Check for duplicate invoice", "Review if amount was adjusted", "Confirm reference numbers are correct"],
+    };
+    if (best.result.gateFailures?.length > 0) {
+      note.narrative += ` Gate failures: ${best.result.gateFailures.join(", ")}.`;
+    }
+    report.investigative_notes.push(note);
+  }
+
+  return report;
+}
+
 async function enhanceReportWithOpenAI(report, openaiApiKey) {
   if (!openaiApiKey || !report || report.investigative_notes?.length === 0) return report;
   try {
@@ -742,9 +883,16 @@ function findSubsetSum(items, target, tolAbs, amountField, rules, targetDoc, tar
         return false;
       }
     }
-    if (strictRef && targetRef && x.ref && x.ref !== targetRef) {
-      log("debug", "subset_sum_ref_filtered", { doc: x.it.document_name, ref: x.ref });
-      return false;
+        if (strictRef && targetRef && x.ref) {
+      const itemRefs = [
+        x.ref,
+        ...(x.it.extracted_fields?.__extracted_refs || [])
+      ].filter(Boolean);
+      const hasLink = itemRefs.some(ref => refMatchesTarget(targetRef, ref));
+      if (!hasLink) {
+        log("debug", "subset_sum_ref_filtered", { doc: x.it.document_name, refs: itemRefs });
+        return false;
+      }
     }
     return true;
   }).sort((a, b) => b.amt - a.amt);
@@ -798,6 +946,141 @@ function findMatches(docsA, docsB, rules, sumConfig, log = () => {}) {
   const rejectedCandidates = [];
   const permanentlyRejected = new Set();
 
+  // ─── PHASE 0: Exact reference + amount gate matches ───────────────────
+  const refRule = rules.find(r => r.type === "reference" && r.is_gate);
+  const amountRule = rules.find(r => r.type === "numeric" && /amount|total|sum|payment|paid|due/.test(r.canonical || r.side_a_field || ""));
+  const dateRule = rules.find(r => r.type === "date");
+
+  if (refRule && amountRule) {
+    for (const a of docsA) {
+      if (docAMatched.has(a.id)) continue;
+      const aRef = normalize(a.extracted_fields?.[refRule.side_a_field]);
+      const aAmt = parseMoney(a.extracted_fields?.[amountRule.side_a_field]);
+      if (!aRef || !aAmt) continue;
+
+      for (const b of docsB) {
+        if (docBMatched.has(b.id)) continue;
+        const bRef = normalize(b.extracted_fields?.[refRule.side_b_field]);
+        const bAmt = parseMoney(b.extracted_fields?.[amountRule.side_b_field]);
+        if (!bRef || !bAmt) continue;
+
+        if (aRef !== bRef && similarity(aRef, bRef) < 0.95) continue;
+        if (!moneyWithinTolerance(aAmt, bAmt, amountRule.tolerance || 0, amountRule.tolerance_percent || 0)) continue;
+
+        if (dateRule) {
+          const dA = parseDate(a.extracted_fields?.[dateRule.side_a_field]);
+          const dB = parseDate(b.extracted_fields?.[dateRule.side_b_field]);
+          if (dA && dB && daysBetween(dA, dB) > (dateRule.tolerance || 7) * 2) continue;
+        }
+
+        const result = scorePair(a, b, rules);
+        const classification = { type: "exact_reference", status: "matched", confidence: "high" };
+        const report = buildInvestigativeReport(a, b, result, rules, classification);
+        matches.push({
+          docA_id: a.id, docB_id: b.id,
+          type: classification.type, status: classification.status, score: result.score,
+          reasons: result.reasons,
+          gate_failures: result.gateFailures,
+          warnings: result.warnings,
+          field_results: result.fieldResults,
+          investigative_report: report,
+        });
+        docAMatched.add(a.id);
+        docBMatched.add(b.id);
+        break;
+      }
+    }
+  }
+
+  // ─── PHASE 1: Side A → multiple Side B (partial payments) ─────────────
+  if (sumConfig?.enabled && sumConfig.side_a_amount_field && sumConfig.side_b_amount_field) {
+    log("debug", "phase_1_sum_matching_start", { aField: sumConfig.side_a_amount_field, bField: sumConfig.side_b_amount_field });
+    for (const a of docsA) {
+      if (docAMatched.has(a.id)) continue;
+      const targetMoney = parseMoney(a.extracted_fields?.[sumConfig.side_a_amount_field]);
+      const target = targetMoney ? targetMoney.cents / 100 : 0;
+      if (!target) continue;
+      const pool = docsB.filter(b => !docBMatched.has(b.id));
+      const tolPct = (sumConfig.tolerance_percent || 0) / 100;
+      const tolAbs = target * tolPct + 0.01;
+      log("debug", "phase_1_attempt", { doc: a.document_name, target, poolSize: pool.length });
+      const subset = findSubsetSum(pool, target, tolAbs, sumConfig.side_b_amount_field, rules, a, "A", true, log);
+      if (subset) {
+        log("debug", "phase_1_match", { doc: a.document_name, subsetCount: subset.length });
+        for (const b of subset) {
+          matches.push({
+            docA_id: a.id, docB_id: b.id,
+            type: "partial_sum", status: "review", score: 85,
+            reasons: { amount_sum: true, item_count: subset.length },
+            gate_failures: [], warnings: [],
+            investigative_report: {
+              verdict: "review", confidence: "medium", match_type: "partial_sum",
+              summary_narrative: `Invoice of ${targetMoney.formatted} matched against ${subset.length} partial payments totaling approximately the same amount.`,
+              deterministic_analysis: {
+                amount: {
+                  side_a: { raw: a.extracted_fields?.[sumConfig.side_a_amount_field], formatted: targetMoney.formatted },
+                  side_b: { item_count: subset.length, note: "Multiple payments combined" },
+                },
+              },
+              investigative_notes: [{
+                type: "partial_payment", severity: "medium",
+                narrative: `This invoice appears to have been paid in ${subset.length} installments. Verify all payment references align.`,
+                suggested_actions: ["Cross-check each payment reference", "Verify no duplicate payments included"],
+              }],
+            },
+          });
+          docBMatched.add(b.id);
+        }
+        docAMatched.add(a.id);
+      }
+    }
+  }
+
+  // ─── PHASE 2: Side B → multiple Side A (consolidated payment / split) ─
+  if (sumConfig?.enabled && sumConfig.side_a_amount_field && sumConfig.side_b_amount_field) {
+    log("debug", "phase_2_sum_matching_start");
+    for (const b of docsB) {
+      if (docBMatched.has(b.id)) continue;
+      const targetMoney = parseMoney(b.extracted_fields?.[sumConfig.side_b_amount_field]);
+      const target = targetMoney ? targetMoney.cents / 100 : 0;
+      if (!target) continue;
+      const pool = docsA.filter(a => !docAMatched.has(a.id));
+      const tolPct = (sumConfig.tolerance_percent || 0) / 100;
+      const tolAbs = target * tolPct + 0.01;
+      log("debug", "phase_2_attempt", { doc: b.document_name, target, poolSize: pool.length });
+      const subset = findSubsetSum(pool, target, tolAbs, sumConfig.side_a_amount_field, rules, b, "B", true, log);
+      if (subset) {
+        log("debug", "phase_2_match", { doc: b.document_name, subsetCount: subset.length });
+        for (const a of subset) {
+          matches.push({
+            docA_id: a.id, docB_id: b.id,
+            type: "split", status: "review", score: 80,
+            reasons: { amount_split: true, item_count: subset.length },
+            gate_failures: [], warnings: [],
+            investigative_report: {
+              verdict: "review", confidence: "medium", match_type: "split",
+              summary_narrative: `Payment of ${targetMoney.formatted} appears to cover ${subset.length} invoices.`,
+              deterministic_analysis: {
+                amount: {
+                  side_a: { item_count: subset.length, note: "Multiple invoices combined" },
+                  side_b: { raw: b.extracted_fields?.[sumConfig.side_b_amount_field], formatted: targetMoney.formatted },
+                },
+              },
+              investigative_notes: [{
+                type: "consolidated_payment", severity: "medium",
+                narrative: `This payment covers multiple invoices. Ensure each invoice is correctly allocated.`,
+                suggested_actions: ["Verify invoice allocation matches payment", "Check for unallocated balances"],
+              }],
+            },
+          });
+          docAMatched.add(a.id);
+        }
+        docBMatched.add(b.id);
+      }
+    }
+  }
+
+  // ─── PHASE 3: Greedy 1:1 high confidence (score >= 90) ────────────────
   for (const a of docsA) {
     if (docAMatched.has(a.id)) continue;
     let best = null, bestScore = 0, bestResult = null;
@@ -829,92 +1112,7 @@ function findMatches(docsA, docsB, rules, sumConfig, log = () => {}) {
     }
   }
 
-  if (sumConfig?.enabled && sumConfig.side_a_amount_field && sumConfig.side_b_amount_field) {
-    log("debug", "phase_2_sum_matching_start", { aField: sumConfig.side_a_amount_field, bField: sumConfig.side_b_amount_field });
-    for (const a of docsA) {
-      if (docAMatched.has(a.id)) continue;
-      const targetMoney = parseMoney(a.extracted_fields?.[sumConfig.side_a_amount_field]);
-      const target = targetMoney ? targetMoney.cents / 100 : 0;
-      if (!target) continue;
-      const pool = docsB.filter(b => !docBMatched.has(b.id));
-      const tolPct = (sumConfig.tolerance_percent || 0) / 100;
-      const tolAbs = target * tolPct + 0.01;
-      log("debug", "phase_2_attempt", { doc: a.document_name, target, poolSize: pool.length });
-      const subset = findSubsetSum(pool, target, tolAbs, sumConfig.side_b_amount_field, rules, a, "A", false, log);
-      if (subset) {
-        log("debug", "phase_2_match", { doc: a.document_name, subsetCount: subset.length });
-        for (const b of subset) {
-          matches.push({
-            docA_id: a.id, docB_id: b.id,
-            type: "partial_sum", status: "review", score: 85,
-            reasons: { amount_sum: true, item_count: subset.length },
-            gate_failures: [], warnings: [],
-            investigative_report: {
-              verdict: "review", confidence: "medium", match_type: "partial_sum",
-              summary_narrative: `Invoice of ${targetMoney.formatted} matched against ${subset.length} partial payments totaling approximately the same amount.`,
-              deterministic_analysis: {
-                amount: {
-                  side_a: { raw: a.extracted_fields?.[sumConfig.side_a_amount_field], formatted: targetMoney.formatted },
-                  side_b: { item_count: subset.length, note: "Multiple payments combined" },
-                },
-              },
-              investigative_notes: [{
-                type: "partial_payment", severity: "medium",
-                narrative: `This invoice appears to have been paid in ${subset.length} installments. Verify all payment references align.`,
-                suggested_actions: ["Cross-check each payment reference", "Verify no duplicate payments included"],
-              }],
-            },
-          });
-          docBMatched.add(b.id);
-        }
-        docAMatched.add(a.id);
-      }
-    }
-  }
-
-  if (sumConfig?.enabled && sumConfig.side_a_amount_field && sumConfig.side_b_amount_field) {
-    log("debug", "phase_3_sum_matching_start");
-    for (const b of docsB) {
-      if (docBMatched.has(b.id)) continue;
-      const targetMoney = parseMoney(b.extracted_fields?.[sumConfig.side_b_amount_field]);
-      const target = targetMoney ? targetMoney.cents / 100 : 0;
-      if (!target) continue;
-      const pool = docsA.filter(a => !docAMatched.has(a.id));
-      const tolPct = (sumConfig.tolerance_percent || 0) / 100;
-      const tolAbs = target * tolPct + 0.01;
-      log("debug", "phase_3_attempt", { doc: b.document_name, target, poolSize: pool.length });
-      const subset = findSubsetSum(pool, target, tolAbs, sumConfig.side_a_amount_field, rules, b, "B", false, log);
-      if (subset) {
-        log("debug", "phase_3_match", { doc: b.document_name, subsetCount: subset.length });
-        for (const a of subset) {
-          matches.push({
-            docA_id: a.id, docB_id: b.id,
-            type: "split", status: "review", score: 80,
-            reasons: { amount_split: true, item_count: subset.length },
-            gate_failures: [], warnings: [],
-            investigative_report: {
-              verdict: "review", confidence: "medium", match_type: "split",
-              summary_narrative: `Payment of ${targetMoney.formatted} appears to cover ${subset.length} invoices.`,
-              deterministic_analysis: {
-                amount: {
-                  side_a: { item_count: subset.length, note: "Multiple invoices combined" },
-                  side_b: { raw: b.extracted_fields?.[sumConfig.side_b_amount_field], formatted: targetMoney.formatted },
-                },
-              },
-              investigative_notes: [{
-                type: "consolidated_payment", severity: "medium",
-                narrative: `This payment covers multiple invoices. Ensure each invoice is correctly allocated.`,
-                suggested_actions: ["Verify invoice allocation matches payment", "Check for unallocated balances"],
-              }],
-            },
-          });
-          docAMatched.add(a.id);
-        }
-        docBMatched.add(b.id);
-      }
-    }
-  }
-
+  // ─── PHASE 4: Greedy 1:1 medium confidence (score >= 60) ──────────────
   for (const a of docsA) {
     if (docAMatched.has(a.id)) continue;
     let best = null, bestScore = 0, bestResult = null;
@@ -957,6 +1155,7 @@ function findMatches(docsA, docsB, rules, sumConfig, log = () => {}) {
     }
   }
 
+  // ─── PHASE 5: Candidate sorting for remaining docs ──────────────────────
   for (const a of docsA) {
     if (docAMatched.has(a.id)) continue;
     const candidates = [];
@@ -998,6 +1197,7 @@ function findMatches(docsA, docsB, rules, sumConfig, log = () => {}) {
     }
   }
 
+  // ─── PHASE 6: Side B leftovers + unmatched report generation ──────────
   for (const b of docsB) {
     if (docBMatched.has(b.id)) continue;
     let best = null, bestScore = 0, bestResult = null;
@@ -1024,8 +1224,40 @@ function findMatches(docsA, docsB, rules, sumConfig, log = () => {}) {
     }
   }
 
-  return { matches, docAMatched, docBMatched, rejectedCandidates };
+  // ─── Fix 3: Build unmatched reports for anything still unmatched ───────
+  const unmatchedReports = [];
+  for (const a of docsA) {
+    if (docAMatched.has(a.id)) continue;
+    const candidates = [];
+    for (const b of docsB) {
+      const result = scorePair(a, b, rules);
+      candidates.push({ doc: b, score: result.score, result, alreadyMatched: docBMatched.has(b.id) });
+    }
+    candidates.sort((x, y) => y.score - x.score);
+    unmatchedReports.push({
+      docId: a.id,
+      side: "A",
+      report: buildUnmatchedReport(a, candidates.slice(0, 3), rules, "A")
+    });
+  }
+  for (const b of docsB) {
+    if (docBMatched.has(b.id)) continue;
+    const candidates = [];
+    for (const a of docsA) {
+      const result = scorePair(a, b, rules);
+      candidates.push({ doc: a, score: result.score, result, alreadyMatched: docAMatched.has(a.id) });
+    }
+    candidates.sort((x, y) => y.score - x.score);
+    unmatchedReports.push({
+      docId: b.id,
+      side: "B",
+      report: buildUnmatchedReport(b, candidates.slice(0, 3), rules, "B")
+    });
+  }
+
+  return { matches, docAMatched, docBMatched, rejectedCandidates, unmatchedReports };
 }
+
 
 module.exports = {
   parseMoney, moneyDiff, moneyWithinTolerance,
@@ -1035,6 +1267,9 @@ module.exports = {
   dateSemanticScore, getDateDirection,
   autoGenerateMatchConfig, validateConfig,
   scorePair, classifyMatch, buildInvestigativeReport,
+  buildUnmatchedReport,        
   enhanceReportWithOpenAI,
-  findSubsetSum, findMatches
+  findSubsetSum, findMatches,
+  refMatchesTarget,            
+  extractEmbeddedReferences,   
 };
