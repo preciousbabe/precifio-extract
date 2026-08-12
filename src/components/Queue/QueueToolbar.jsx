@@ -55,10 +55,7 @@ export default function QueueToolbar({
       </div>
 
       <div className="queue-toolbar-center">
-        {/* ADD EXPORT ALL BUTTON HERE */}
-        {completed > 0 && (
-          <ExportAllButton items={items} />
-        )}
+        <ExportAllButton items={items} />
 
         {/* Selection controls */}
         {selected > 0 ? (

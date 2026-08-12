@@ -25,6 +25,25 @@ exports.handler = async (event, context) => {
 
   const { email, password, fullName, companyName } = JSON.parse(event.body);
 
+  // Rate limit: max 3 signup attempts per IP per hour
+const clientIp = event.headers['x-nf-client-connection-ip'] || 
+                 event.headers['x-forwarded-for']?.split(',')[0]?.trim() || 
+                 'unknown';
+
+const { data: recentSignups } = await supabase
+  .from('profiles')
+  .select('id', { count: 'exact' })
+  .eq('signup_ip', clientIp)  // You'll need to add this column
+  .gte('created_at', new Date(Date.now() - 60 * 60 * 1000).toISOString());
+
+if (recentSignups && recentSignups.length >= 3) {
+  return {
+    statusCode: 429,
+    headers,
+    body: JSON.stringify({ error: 'Too many signup attempts from this network. Please try again later.' })
+  };
+}
+
     // ── Block disposable emails ──
   const DISPOSABLE_DOMAINS = new Set([
     'tempmail.com','mailinator.com','guerrillamail.com','yopmail.com',
@@ -58,7 +77,7 @@ exports.handler = async (event, context) => {
     const { data: authData, error: authError } = await supabase.auth.admin.createUser({
       email,
       password,
-      email_confirm: true,
+      email_confirm: false,
       user_metadata: { full_name: fullName, company_name: companyName }
     });
 
@@ -74,6 +93,7 @@ exports.handler = async (event, context) => {
         full_name: fullName,
         company_name: companyName,
         credits_remaining: 10,
+        signup_ip: clientIp, 
         created_at: new Date().toISOString()
       });
 

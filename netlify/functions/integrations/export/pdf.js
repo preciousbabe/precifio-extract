@@ -10,9 +10,10 @@ const {
   calculateColumnWidths
 } = require("./utils");
 
+
 const PAGE_WIDTH  = 595.28;
 const PAGE_HEIGHT = 841.89;
-const MARGIN      = 70;
+const MARGIN      = 85;
 const BOTTOM_MARGIN = 60;
 const CONTENT_TOP   = PAGE_HEIGHT - MARGIN;
 const CONTENT_BOTTOM = BOTTOM_MARGIN;

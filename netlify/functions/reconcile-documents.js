@@ -51,9 +51,19 @@ exports.handler = async (event, context) => {
 
   const MAX_DOCS_PER_SIDE = 200;
 
-  if (documents.length > 5000) {
-    return err(413, "Too many documents. Maximum 5000 per request.");
+if (documents.length > MAX_DOCS_PER_SIDE) { 
+  return err(413, "Too many documents...");
+}
+
+// Add validation for document size
+const MAX_FIELD_SIZE = 60000; 
+for (const d of documents) {
+  const size = JSON.stringify(d).length;
+  if (size > MAX_FIELD_SIZE) {
+    return err(413, `Document exceeds ${MAX_FIELD_SIZE} bytes`);
   }
+}
+
 
   // Count existing docs on this side
   const { count: existingCount } = await supabase

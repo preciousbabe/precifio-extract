@@ -47,36 +47,55 @@ exports.handler = async (event, context) => {
 
     let userProfile = profile;
 
-    if (!userProfile) {
-      console.log('No profile found for user', user.id, '- creating with 10 credits');
+    const emailConfirmed = !!user.email_confirmed_at;
 
-      const { data: newProfile, error: createError } = await supabase
-        .from('profiles')
-        .insert({
-          id: user.id,
-          email: user.email,
-          full_name: user.user_metadata?.full_name || null,
-          company_name: user.user_metadata?.company_name || null,
-          credits_remaining: 10,
-          created_at: new Date().toISOString()
-        })
-        .select()
-        .single();
+if (!userProfile) {
+  // Only create profile with credits if email is confirmed
+  const initialCredits = emailConfirmed ? 10 : 0;
 
-      if (createError) {
-        console.error('Failed to create profile:', createError);
-        // Fallback: return minimal profile so frontend still works
-        userProfile = {
-          id: user.id,
-          email: user.email,
-          credits_remaining: 10,
-          full_name: user.user_metadata?.full_name || null,
-          company_name: user.user_metadata?.company_name || null
-        };
-      } else {
-        userProfile = newProfile;
-      }
-    }
+  const { data: newProfile, error: createError } = await supabase
+    .from('profiles')
+    .insert({
+      id: user.id,
+      email: user.email,
+      full_name: user.user_metadata?.full_name || null,
+      company_name: user.user_metadata?.company_name || null,
+      credits_remaining: initialCredits,
+      created_at: new Date().toISOString()
+    })
+    .select()
+    .single();
+
+  if (!createError && emailConfirmed) {
+    // Log the signup bonus only when email is actually confirmed
+    await supabase.from('credit_transactions').insert({
+      user_id: user.id,
+      amount: 10,
+      type: 'bonus',
+      balance_after: 10,
+      status: 'completed',
+      metadata: { reason: 'signup_bonus' }
+    });
+  }
+
+  userProfile = newProfile || {
+    id: user.id,
+    email: user.email,
+    credits_remaining: initialCredits
+  };
+}
+
+if (!emailConfirmed) {
+  return {
+    statusCode: 403,
+    headers,
+    body: JSON.stringify({
+      error: "Please confirm your email before extracting documents.",
+      code: "EMAIL_NOT_CONFIRMED",
+      email: user.email,
+    }),
+  };
+}
 
     console.log('auth-me returning profile with credits:', userProfile?.credits_remaining);
 

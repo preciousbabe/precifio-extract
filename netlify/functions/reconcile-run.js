@@ -6,8 +6,19 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+const IS_PROD = process.env.NODE_ENV === "production";
+
+function log(level, event, meta = {}) {
+  if (IS_PROD && level === "debug") return;
+  const entry = { level, event, timestamp: new Date().toISOString(), ...meta };
+  const line = JSON.stringify(entry);
+  if (level === "error") console.error(line);
+  else if (level === "warn") console.warn(line);
+  else console.log(line);
+}
+
 const CORS = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": process.env.CORS_ORIGIN || "*",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
@@ -16,19 +27,105 @@ function ok(body) {
   return { statusCode: 200, headers: CORS, body: JSON.stringify(body) };
 }
 
-function err(status, message, extra = {}) {
-  return { statusCode: status, headers: CORS, body: JSON.stringify({ error: message, ...extra }) };
+function err(status, code, message, extra = {}) {
+  return {
+    statusCode: status,
+    headers: CORS,
+    body: JSON.stringify({ error: { code, message, ...extra } }),
+  };
+}
+
+class ReconciliationError extends Error {
+  constructor(code, message, recoverable = false) {
+    super(message);
+    this.code = code;
+    this.recoverable = recoverable;
+  }
 }
 
 async function getUser(event) {
   const token = event.headers.authorization?.replace("Bearer ", "");
-  if (!token) return { error: "Unauthorized", status: 401 };
+  if (!token) throw new ReconciliationError("UNAUTHORIZED", "Missing authorization header");
   const { data, error } = await supabase.auth.getUser(token);
-  if (error || !data.user) return { error: "Invalid token", status: 401 };
-  return { user: data.user };
+  if (error || !data.user) throw new ReconciliationError("UNAUTHORIZED", "Invalid token");
+  return data.user;
 }
 
-// ─── String / Math Utilities ──────────────────────────────
+function validateUUID(v, name) {
+  if (!v || typeof v !== "string") return { valid: false, error: `${name} is required` };
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v))
+    return { valid: false, error: `${name} must be a valid UUID` };
+  return { valid: true };
+}
+
+function validateConfig(config) {
+  if (!config || typeof config !== "object") return { valid: false, error: "configuration must be an object" };
+  if (!Array.isArray(config.rules)) return { valid: false, error: "configuration.rules must be an array" };
+  for (let i = 0; i < config.rules.length; i++) {
+    const r = config.rules[i];
+    if (!r.side_a_field || !r.side_b_field) {
+      return { valid: false, error: `Rule ${i}: side_a_field and side_b_field are required` };
+    }
+    if (typeof r.weight !== "number" || r.weight < 0 || r.weight > 1) {
+      return { valid: false, error: `Rule ${i}: weight must be between 0 and 1` };
+    }
+  }
+  return { valid: true };
+}
+
+function parseMoney(value) {
+  if (value === null || value === undefined) return null;
+  let str = String(value).trim();
+  if (!str) return null;
+
+  const isNegative = str.includes("(") && str.includes(")");
+  str = str.replace(/[()]/g, "");
+  str = str.replace(/[$€£¥\s]/g, "");
+
+  const lastComma = str.lastIndexOf(",");
+  const lastDot = str.lastIndexOf(".");
+
+  let normalized;
+  if (lastComma > lastDot && lastComma !== -1) {
+    normalized = str.replace(/\./g, "").replace(",", ".");
+  } else {
+    normalized = str.replace(/,/g, "");
+  }
+
+  const num = parseFloat(normalized);
+  if (isNaN(num)) return null;
+
+  const cents = Math.round((isNegative ? -num : num) * 100);
+  return {
+    cents,
+    original: value,
+    formatted: (Math.abs(cents) / 100).toFixed(2),
+    isNegative: cents < 0,
+    sign: cents < 0 ? "-" : "",
+  };
+}
+
+function moneyDiff(a, b) {
+  if (!a || !b) return null;
+  const diffCents = a.cents - b.cents;
+  return {
+    cents: diffCents,
+    formatted: (diffCents / 100).toFixed(2),
+    absCents: Math.abs(diffCents),
+    absFormatted: (Math.abs(diffCents) / 100).toFixed(2),
+    percentOfA: a.cents !== 0 ? ((Math.abs(diffCents) / Math.abs(a.cents)) * 100).toFixed(2) : null,
+    direction: diffCents > 0 ? "a_larger" : diffCents < 0 ? "b_larger" : "equal",
+  };
+}
+
+function moneyWithinTolerance(a, b, tolAbs, tolPercent) {
+  if (!a || !b) return false;
+  const diff = Math.abs(a.cents - b.cents);
+  const absTolCents = Math.round((tolAbs || 0) * 100);
+  const pctTolCents = Math.round(Math.abs(a.cents) * ((tolPercent || 0) / 100));
+  return diff <= absTolCents + pctTolCents;
+}
+
 function levenshtein(a, b) {
   const m = [], n = a.length, p = b.length;
   if (!n) return p; if (!p) return n;
@@ -54,19 +151,18 @@ function normalize(s) {
   return String(s || "").toLowerCase().replace(/[^\w\s]/g, "").trim();
 }
 
-function parseNumeric(v) {
-  if (typeof v === "number") return v;
-  if (!v) return null;
-  let s = String(v).replace(/[^\d.()-]/g, "");
-  const isNegative = s.includes("(") && s.includes(")");
-  s = s.replace(/[()]/g, "");
-  const n = parseFloat(s);
-  return isNaN(n) ? null : (isNegative ? -n : n);
-}
-
 function parseDate(v) {
   if (!v) return null;
-  const d = new Date(v);
+  const str = String(v).trim();
+  if (/^\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}$/.test(str)) {
+    const d = new Date(str);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  if (/^\d{4}[\/\-.]\d{2}[\/\-.]\d{2}/.test(str)) {
+    const d = new Date(str);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  const d = new Date(str);
   return isNaN(d.getTime()) ? null : d;
 }
 
@@ -109,13 +205,12 @@ async function resolveFieldAliases(userId) {
   return map;
 }
 
-// ─── Date Semantic Scoring ────────────────────────────────
 function dateSemanticScore(fieldNameA, fieldNameB) {
   const a = fieldNameA.toLowerCase();
   const b = fieldNameB.toLowerCase();
-  const invoiceTerms = ['invoice', 'bill', 'issued', 'created', 'document', 'generated'];
-  const paymentTerms = ['payment', 'paid', 'settlement', 'clearance', 'remittance', 'processed'];
-  const dueTerms = ['due', 'deadline', 'maturity', 'expiry'];
+  const invoiceTerms = ["invoice", "bill", "issued", "created", "document", "generated"];
+  const paymentTerms = ["payment", "paid", "settlement", "clearance", "remittance", "processed"];
+  const dueTerms = ["due", "deadline", "maturity", "expiry"];
 
   const aIsInvoice = invoiceTerms.some(t => a.includes(t));
   const bIsInvoice = invoiceTerms.some(t => b.includes(t));
@@ -133,9 +228,9 @@ function dateSemanticScore(fieldNameA, fieldNameB) {
 function getDateDirection(fieldNameA, fieldNameB) {
   const a = fieldNameA.toLowerCase();
   const b = fieldNameB.toLowerCase();
-  const paymentTerms = ['payment', 'paid', 'settlement', 'clearance', 'remittance', 'processed'];
-  const invoiceTerms = ['invoice', 'bill', 'issued', 'created', 'document', 'generated'];
-  const dueTerms = ['due', 'deadline', 'maturity'];
+  const paymentTerms = ["payment", "paid", "settlement", "clearance", "remittance", "processed"];
+  const invoiceTerms = ["invoice", "bill", "issued", "created", "document", "generated"];
+  const dueTerms = ["due", "deadline", "maturity"];
 
   const aIsPayment = paymentTerms.some(t => a.includes(t));
   const bIsPayment = paymentTerms.some(t => b.includes(t));
@@ -144,14 +239,13 @@ function getDateDirection(fieldNameA, fieldNameB) {
   const aIsDue = dueTerms.some(t => a.includes(t));
   const bIsDue = dueTerms.some(t => b.includes(t));
 
-  if (aIsInvoice && bIsPayment) return 'a_before_b';
-  if (aIsPayment && bIsInvoice) return 'b_before_a';
-  if (aIsDue && bIsPayment) return 'b_before_a';
-  if (aIsPayment && bIsDue) return 'a_before_b';
+  if (aIsInvoice && bIsPayment) return "a_before_b";
+  if (aIsPayment && bIsInvoice) return "b_before_a";
+  if (aIsDue && bIsPayment) return "b_before_a";
+  if (aIsPayment && bIsDue) return "a_before_b";
   return null;
 }
 
-// ─── Enhanced Auto Config ─────────────────────────────────
 function autoGenerateMatchConfig(sideAFields, sideBFields, aliasMap, docsA = [], docsB = []) {
   const aCanon = [...new Set(sideAFields)].map(f => ({ raw: f, canon: canonicalizeFieldName(f, aliasMap) }));
   const bCanon = [...new Set(sideBFields)].map(f => ({ raw: f, canon: canonicalizeFieldName(f, aliasMap) }));
@@ -160,7 +254,6 @@ function autoGenerateMatchConfig(sideAFields, sideBFields, aliasMap, docsA = [],
   const usedA = new Set();
   const usedB = new Set();
 
-  // ── Phase 1: Value-based pairing ──
   if (docsA.length > 0 && docsB.length > 0) {
     const norm = v => String(v || "").toLowerCase().replace(/[^\w\s]/g, "").trim();
     const candidates = [];
@@ -188,17 +281,13 @@ function autoGenerateMatchConfig(sideAFields, sideBFields, aliasMap, docsA = [],
         }
 
         const nameSim = similarity(af.canon, bf.canon);
-
         let semanticBoost = 0;
         if (aType === "date" && bType === "date") {
           semanticBoost = dateSemanticScore(af.raw, bf.raw) * 0.25;
         }
 
         const score = (overlap * 0.55) + (nameSim * 0.25) + (typeCompat * 0.10) + semanticBoost;
-
-        if (score > 0.20) {
-          candidates.push({ af, bf, score, type: aType });
-        }
+        if (score > 0.20) candidates.push({ af, bf, score, type: aType });
       }
     }
 
@@ -210,7 +299,6 @@ function autoGenerateMatchConfig(sideAFields, sideBFields, aliasMap, docsA = [],
       const isCurrency = /currency/.test(c.af.canon);
       const isReference = type === "reference";
       const dateDirection = (type === "date") ? getDateDirection(c.af.raw, c.bf.raw) : null;
-
       const weight = isAmount ? 0.35 : type === "date" ? 0.25 : isReference ? 0.25 : isCurrency ? 0.10 : 0.15;
 
       rules.push({
@@ -230,7 +318,6 @@ function autoGenerateMatchConfig(sideAFields, sideBFields, aliasMap, docsA = [],
     }
   }
 
-  // ── Phase 2: Name-based fallback ──
   for (const af of aCanon) {
     if (usedA.has(af.raw)) continue;
     const exact = bCanon.find(bf => bf.canon === af.canon && !usedB.has(bf.raw));
@@ -240,7 +327,6 @@ function autoGenerateMatchConfig(sideAFields, sideBFields, aliasMap, docsA = [],
       const isCurrency = /currency/.test(af.canon);
       const isReference = type === "reference";
       const dateDirection = (type === "date") ? getDateDirection(af.raw, exact.raw) : null;
-
       const weight = isAmount ? 0.35 : type === "date" ? 0.25 : isReference ? 0.25 : isCurrency ? 0.10 : 0.15;
       rules.push({
         side_a_field: af.raw,
@@ -257,7 +343,6 @@ function autoGenerateMatchConfig(sideAFields, sideBFields, aliasMap, docsA = [],
       usedB.add(exact.raw);
       continue;
     }
-
     const fuzzy = bCanon.find(bf => similarity(af.canon, bf.canon) >= 0.75 && !usedB.has(bf.raw));
     if (fuzzy) {
       const type = detectFieldType(af.canon, aliasMap);
@@ -291,8 +376,6 @@ function autoGenerateMatchConfig(sideAFields, sideBFields, aliasMap, docsA = [],
   };
 }
 
-
-// ─── Enhanced Scoring Engine ──────────────────────────────
 function scorePair(docA, docB, rules) {
   let totalScore = 0;
   let totalWeight = 0;
@@ -323,33 +406,32 @@ function scorePair(docA, docB, rules) {
 
     switch (rule.strategy) {
       case "exact_with_tolerance": {
-        const nA = parseNumeric(valA), nB = parseNumeric(valB);
-        if (nA !== null && nB !== null) {
-          const diff = Math.abs(nA - nB);
-          const pct = nA !== 0 ? diff / Math.abs(nA) : (nB === 0 ? 0 : 1);
-          const tolAbs = rule.tolerance || 0;
-          const tolPct = (rule.tolerance_percent || 0) / 100;
-
-          variance = `${diff.toFixed(2)} (${(pct * 100).toFixed(2)}%)`;
-
-          if (diff <= tolAbs + 0.001 || pct <= tolPct + 0.0001) {
+        const moneyA = parseMoney(valA);
+        const moneyB = parseMoney(valB);
+        if (moneyA && moneyB) {
+          const diff = moneyDiff(moneyA, moneyB);
+          const withinTol = moneyWithinTolerance(moneyA, moneyB, rule.tolerance || 0, rule.tolerance_percent || 0);
+          variance = {
+            diff_cents: diff.cents,
+            diff_formatted: diff.formatted,
+            percent_variance: diff.percentOfA,
+            within_tolerance: withinTol,
+          };
+          if (withinTol) {
             match = true;
             score = 1;
-          } else if (pct <= 0.05) {
+          } else if (parseFloat(diff.percentOfA) <= 5) {
             score = 0.7;
-          } else if (pct <= 0.10) {
+          } else if (parseFloat(diff.percentOfA) <= 10) {
             score = 0.4;
-          } else if (pct <= 0.20) {
+          } else if (parseFloat(diff.percentOfA) <= 20) {
             score = 0.2;
           } else {
             score = 0;
           }
-
-          if (!match && rule.is_gate) {
-            gateFailures.push(`${rule.canonical}_mismatch`);
-          }
+          if (!match && rule.is_gate) gateFailures.push(`${rule.canonical}_mismatch`);
         } else {
-          variance = "non-numeric";
+          variance = { type: "non-numeric", raw_a: valA, raw_b: valB };
           if (rule.is_gate) gateFailures.push(`${rule.canonical}_invalid`);
         }
         break;
@@ -360,33 +442,22 @@ function scorePair(docA, docB, rules) {
         if (dA && dB) {
           const dd = daysBetween(dA, dB);
           const tol = rule.tolerance || 7;
-          variance = `${dd} days`;
-
-          if (dd <= tol) {
-            match = true;
-            score = 1;
-          } else if (dd <= tol * 2) {
-            score = 0.5;
-          } else {
-            score = 0;
-          }
-
+          variance = { days_diff: dd, tolerance: tol };
+          if (dd <= tol) { match = true; score = 1; }
+          else if (dd <= tol * 2) { score = 0.5; }
+          else { score = 0; }
           if (rule.date_direction) {
             const delta = dateDiffDays(dA, dB);
-            if (rule.date_direction === 'a_before_b' && delta < 0) {
+            const isViolation = (rule.date_direction === "a_before_b" && delta < 0) || (rule.date_direction === "b_before_a" && delta > 0);
+            if (isViolation) {
               warnings.push(`date_sequence_violation:${rule.canonical}`);
-              match = false;
-              score = Math.min(score, 0.5);
-              variance += `; sequence_error(after_b)`;
-            } else if (rule.date_direction === 'b_before_a' && delta > 0) {
-              warnings.push(`date_sequence_violation:${rule.canonical}`);
-              match = false;
-              score = Math.min(score, 0.5);
-              variance += `; sequence_error(after_a)`;
+              match = false; score = Math.min(score, 0.5);
+              variance.sequence_error = true;
+              variance.expected_direction = rule.date_direction;
             }
           }
         } else {
-          variance = "invalid_date";
+          variance = { type: "invalid_date", raw_a: valA, raw_b: valB };
         }
         break;
       }
@@ -394,20 +465,13 @@ function scorePair(docA, docB, rules) {
       case "normalized_exact": {
         const nA = normalize(valA), nB = normalize(valB);
         if (nA && nB) {
-          if (nA === nB) {
-            match = true;
-            score = 1;
-          } else if (similarity(nA, nB) >= 0.9) {
-            score = 0.8;
-          } else {
-            score = 0;
-          }
-          if (!match && rule.is_gate) {
-            gateFailures.push(`${rule.canonical}_mismatch`);
-          }
-          variance = nA === nB ? "exact" : "differs";
+          if (nA === nB) { match = true; score = 1; }
+          else if (similarity(nA, nB) >= 0.9) { score = 0.8; }
+          else { score = 0; }
+          if (!match && rule.is_gate) gateFailures.push(`${rule.canonical}_mismatch`);
+          variance = { normalized_a: nA, normalized_b: nB, exact: nA === nB };
         } else {
-          variance = "empty";
+          variance = { type: "empty" };
           if (rule.is_gate) gateFailures.push(`${rule.canonical}_empty`);
         }
         break;
@@ -415,71 +479,44 @@ function scorePair(docA, docB, rules) {
 
       case "exact": {
         const sA = String(valA).trim(), sB = String(valB).trim();
-        if (sA.toLowerCase() === sB.toLowerCase()) {
-          match = true;
-          score = 1;
-        } else {
-          score = 0;
-        }
-        if (!match && rule.is_gate) {
-          gateFailures.push(`${rule.canonical}_mismatch`);
-        }
-        variance = match ? "exact" : `${sA} vs ${sB}`;
+        if (sA.toLowerCase() === sB.toLowerCase()) { match = true; score = 1; }
+        else { score = 0; }
+        if (!match && rule.is_gate) gateFailures.push(`${rule.canonical}_mismatch`);
+        variance = { exact: match, raw_a: sA, raw_b: sB };
         break;
       }
 
       case "fuzzy": {
         const sim = similarity(valA, valB);
-        if (sim >= 0.9) {
-          match = true;
-          score = 1;
-        } else if (sim >= 0.75) {
-          score = 0.7;
-        } else if (sim >= 0.6) {
-          score = 0.4;
-        } else {
-          score = 0;
-        }
-        variance = `${(sim * 100).toFixed(1)}% similar`;
+        if (sim >= 0.9) { match = true; score = 1; }
+        else if (sim >= 0.75) { score = 0.7; }
+        else if (sim >= 0.6) { score = 0.4; }
+        else { score = 0; }
+        variance = { similarity: sim, similarity_pct: (sim * 100).toFixed(1) + "%" };
         break;
       }
 
       default: {
         const sim = similarity(valA, valB);
-        if (sim >= 0.9) {
-          match = true;
-          score = 1;
-        } else if (sim >= 0.7) {
-          score = 0.6;
-        } else {
-          score = 0;
-        }
-        variance = `${(sim * 100).toFixed(1)}% similar`;
+        if (sim >= 0.9) { match = true; score = 1; }
+        else if (sim >= 0.7) { score = 0.6; }
+        else { score = 0; }
+        variance = { similarity: sim, similarity_pct: (sim * 100).toFixed(1) + "%" };
       }
     }
 
     totalScore += score * rule.weight;
     totalWeight += rule.weight;
-
     if (rule.is_gate) {
       gateScore += score * rule.weight;
       gateWeight += rule.weight;
     }
+    fieldResults.push({ canonical: rule.canonical, match, score, weight: rule.weight, variance, strategy: rule.strategy });
 
-    fieldResults.push({ canonical: rule.canonical, match, score, weight: rule.weight, variance });
-
-    if (match) {
-      reasons[rule.canonical] = "exact";
-    } else if (score >= 0.7) {
-      reasons[rule.canonical] = "close";
-    } else if (score > 0) {
-      reasons[rule.canonical] = "weak";
-    } else {
-      reasons[rule.canonical] = "mismatch";
-    }
-    if (variance && !match) {
-      reasons[`${rule.canonical}_detail`] = String(variance).substring(0, 100);
-    }
+    if (match) reasons[rule.canonical] = "exact";
+    else if (score >= 0.7) reasons[rule.canonical] = "close";
+    else if (score > 0) reasons[rule.canonical] = "weak";
+    else reasons[rule.canonical] = "mismatch";
   }
 
   const normalizedScore = totalWeight > 0 ? Math.round((totalScore / totalWeight) * 100) : 0;
@@ -493,106 +530,289 @@ function scorePair(docA, docB, rules) {
     warnings,
     fieldResults,
     totalWeight,
-    allGatesPresent
+    allGatesPresent,
   };
 }
 
 function classifyMatch(score, gateScore, gateFailures, warnings, allGatesPresent) {
-  // Hard reject: currency mismatch is unrecoverable
-  if (gateFailures.some(g => g.includes('currency'))) {
-    return { type: 'currency_mismatch', status: 'unmatched', confidence: 'none' };
+  if (gateFailures.some(g => g.includes("currency"))) {
+    return { type: "currency_mismatch", status: "unmatched", confidence: "none" };
   }
+  const amountFailed = gateFailures.some(g => g.includes("amount"));
+  const referenceFailed = gateFailures.some(g => g.includes("reference"));
+  const hasDateWarning = warnings.some(w => w.includes("date_sequence"));
 
-  const amountFailed = gateFailures.some(g => g.includes('amount'));
-  const referenceFailed = gateFailures.some(g => g.includes('reference'));
-  const hasDateWarning = warnings.some(w => w.includes('date_sequence'));
-
-  // Exact: all gates perfect (100%), no warnings, all gates present
   if (gateScore === 100 && allGatesPresent && !hasDateWarning && gateFailures.length === 0) {
-    return { type: 'exact', status: 'matched', confidence: 'high' };
+    return { type: "exact", status: "matched", confidence: "high" };
   }
-
-  // Matched: >= 90 total, no hard gate failures, no date warnings
   if (score >= 90 && !amountFailed && !referenceFailed && !hasDateWarning && gateFailures.length === 0) {
-    return { type: 'matched', status: 'matched', confidence: 'high' };
+    return { type: "matched", status: "matched", confidence: "high" };
   }
-
-  // Review: >= 60 total
   if (score >= 60) {
-    // Date anomaly takes precedence over amount variance
-    if (hasDateWarning && amountFailed) {
-      return { type: 'amount_and_date_anomaly', status: 'review', confidence: 'medium' };
-    }
-    if (hasDateWarning) {
-      return { type: 'date_anomaly', status: 'review', confidence: 'medium' };
-    }
-    if (amountFailed) {
-      return { type: 'amount_variance', status: 'review', confidence: 'medium' };
-    }
-    if (referenceFailed) {
-      return { type: 'reference_mismatch', status: 'review', confidence: 'medium' };
-    }
-    return { type: 'review', status: 'review', confidence: 'medium' };
+    if (hasDateWarning && amountFailed) return { type: "amount_and_date_anomaly", status: "review", confidence: "medium" };
+    if (hasDateWarning) return { type: "date_anomaly", status: "review", confidence: "medium" };
+    if (amountFailed) return { type: "amount_variance", status: "review", confidence: "medium" };
+    if (referenceFailed) return { type: "reference_mismatch", status: "review", confidence: "medium" };
+    return { type: "review", status: "review", confidence: "medium" };
   }
-
-  // Near-miss: 40-59 with amount-only variance (retentions, discounts)
   if (score >= 40 && amountFailed && !referenceFailed && !hasDateWarning) {
-    return { type: 'amount_variance', status: 'review', confidence: 'low' };
+    return { type: "amount_variance", status: "review", confidence: "low" };
   }
-
-  if (score >= 40) {
-    return { type: 'partial', status: 'partial', confidence: 'low' };
-  }
-
-  return { type: 'unmatched', status: 'unmatched', confidence: 'none' };
+  if (score >= 40) return { type: "partial", status: "partial", confidence: "low" };
+  return { type: "unmatched", status: "unmatched", confidence: "none" };
 }
 
-// ─── Enhanced Subset Sum with Optional Ref Guard ──────────
-function findSubsetSum(items, target, tolAbs, amountField, rules, targetDoc, targetSide = 'B', strictRef = false) {
-  const referenceRule = rules.find(r => r.type === 'reference' && r.is_gate);
-  const vendorRule = rules.find(r =>
-    (r.canon.includes('vendor') || r.canon.includes('supplier') || r.canon.includes('payee')) && r.weight >= 0.1
-  );
+function buildInvestigativeReport(docA, docB, scoreResult, rules, classification) {
+  const report = {
+    verdict: classification.status,
+    confidence: classification.confidence,
+    match_type: classification.type,
+    deterministic_analysis: {},
+    investigative_notes: [],
+    evidence_references: {
+      document_a: { id: docA.id, name: docA.document_name, snapshot: docA.extracted_fields },
+      document_b: { id: docB.id, name: docB.document_name, snapshot: docB.extracted_fields },
+      rules_applied: rules.map(r => ({
+        canonical: r.canonical,
+        side_a_field: r.side_a_field,
+        side_b_field: r.side_b_field,
+        weight: r.weight,
+        strategy: r.strategy,
+        is_gate: r.is_gate,
+        tolerance: r.tolerance,
+        tolerance_percent: r.tolerance_percent,
+      })),
+      scoring_at_time: {
+        total_score: scoreResult.score,
+        gate_score: scoreResult.gateScore,
+        all_gates_present: scoreResult.allGatesPresent,
+        gate_failures: scoreResult.gateFailures,
+        warnings: scoreResult.warnings,
+      },
+    },
+  };
 
-  const targetRef = referenceRule
-    ? normalize(targetDoc.extracted_fields?.[targetSide === 'A' ? referenceRule.side_a_field : referenceRule.side_b_field])
-    : null;
-  const targetVen = vendorRule
-    ? normalize(targetDoc.extracted_fields?.[targetSide === 'A' ? vendorRule.side_a_field : vendorRule.side_b_field])
-    : null;
+  // Amount analysis
+  const amountRule = rules.find(r => r.type === "numeric" && /amount|total|sum|payment|paid|due/.test(r.canon));
+  if (amountRule) {
+    const valA = docA.extracted_fields?.[amountRule.side_a_field];
+    const valB = docB.extracted_fields?.[amountRule.side_b_field];
+    const moneyA = parseMoney(valA);
+    const moneyB = parseMoney(valB);
 
-  console.log(`[findSubsetSum] target=${target}, tol=${tolAbs}, amountField=${amountField}, strictRef=${strictRef}`);
-  console.log(`[findSubsetSum] targetVen=${targetVen}, targetRef=${targetRef}`);
-  console.log(`[findSubsetSum] pool size=${items.length}`);
-
-  const valid = items
-    .map((it) => ({
-      it,
-      amt: parseNumeric(it.extracted_fields?.[amountField]) || 0,
-      ref: referenceRule ? normalize(it.extracted_fields?.[targetSide === 'A' ? referenceRule.side_b_field : referenceRule.side_a_field]) : null,
-      ven: vendorRule ? normalize(it.extracted_fields?.[targetSide === 'A' ? vendorRule.side_b_field : vendorRule.side_a_field]) : null
-    }))
-    .filter((x) => {
-      if (x.amt <= 0) return false;
-      if (targetVen && x.ven) {
-        const sim = similarity(targetVen, x.ven);
-        if (sim < 0.8) {
-          console.log(`[findSubsetSum] filtered by vendor: ${x.it.document_name} (ven=${x.ven}, sim=${sim})`);
-          return false;
-        }
+    if (moneyA && moneyB) {
+      const diff = moneyDiff(moneyA, moneyB);
+      const withinTol = moneyWithinTolerance(moneyA, moneyB, amountRule.tolerance || 0, amountRule.tolerance_percent || 0);
+      report.deterministic_analysis.amount = {
+        side_a: { raw: valA, cents: moneyA.cents, formatted: moneyA.formatted },
+        side_b: { raw: valB, cents: moneyB.cents, formatted: moneyB.formatted },
+        difference: diff,
+        within_tolerance: withinTol,
+        tolerance_config: { absolute: amountRule.tolerance || 0, percent: amountRule.tolerance_percent || 0 },
+        assessment: diff.cents === 0 ? "Amounts match exactly." : `Difference of ${diff.absFormatted} (${diff.percentOfA || 0}% of base).`,
+      };
+      if (diff.cents !== 0) {
+        const pct = parseFloat(diff.percentOfA || 0);
+        const severity = pct <= 1 ? "low" : pct <= 5 ? "medium" : "high";
+        const narrative = diff.direction === "a_larger"
+          ? `The payment is ${diff.absFormatted} below the invoice amount.`
+          : `The payment exceeds the invoice by ${diff.absFormatted}.`;
+        report.investigative_notes.push({
+          type: "amount_variance",
+          severity,
+          narrative: `${narrative} This could indicate a partial payment, early payment discount, credit note, or deduction.`,
+          evidence_paths: [
+            `document_a.extracted_fields.${amountRule.side_a_field}`,
+            `document_b.extracted_fields.${amountRule.side_b_field}`,
+          ],
+          suggested_actions: [
+            "Check payment terms for early payment discounts",
+            "Review credit notes or adjustments",
+            "Verify if retention or withholding applies",
+            "Confirm partial payment agreement",
+          ],
+        });
       }
-      if (strictRef && targetRef && x.ref && x.ref !== targetRef) {
-        console.log(`[findSubsetSum] filtered by ref: ${x.it.document_name} (ref=${x.ref})`);
+    } else {
+      report.deterministic_analysis.amount = {
+        side_a: { raw: valA, parsed: !!moneyA },
+        side_b: { raw: valB, parsed: !!moneyB },
+        assessment: "One or both amount values could not be parsed as money.",
+      };
+      report.investigative_notes.push({
+        type: "unparseable_amount",
+        severity: "high",
+        narrative: "Amount field could not be parsed. Verify data extraction quality.",
+        evidence_paths: [
+          `document_a.extracted_fields.${amountRule.side_a_field}`,
+          `document_b.extracted_fields.${amountRule.side_b_field}`,
+        ],
+        suggested_actions: ["Review extraction pipeline for this field", "Check for currency symbols or malformed numbers"],
+      });
+    }
+  }
+
+  // Reference analysis
+  const refRule = rules.find(r => r.type === "reference" && r.is_gate);
+  if (refRule) {
+    const valA = docA.extracted_fields?.[refRule.side_a_field];
+    const valB = docB.extracted_fields?.[refRule.side_b_field];
+    const normA = normalize(valA);
+    const normB = normalize(valB);
+    report.deterministic_analysis.reference = {
+      side_a: valA, side_b: valB,
+      normalized_a: normA, normalized_b: normB,
+      match_type: normA === normB ? "exact" : similarity(normA, normB) >= 0.9 ? "close" : "mismatch",
+      assessment: normA === normB ? "Reference numbers match exactly." : `Reference mismatch: "${valA}" vs "${valB}".`,
+    };
+    if (normA !== normB) {
+      report.investigative_notes.push({
+        type: "reference_mismatch",
+        severity: "high",
+        narrative: `Reference numbers do not match: "${valA}" vs "${valB}". This may indicate a wrong document pairing or data entry error.`,
+        evidence_paths: [
+          `document_a.extracted_fields.${refRule.side_a_field}`,
+          `document_b.extracted_fields.${refRule.side_b_field}`,
+        ],
+        suggested_actions: [
+          "Verify document pairing is correct",
+          "Check for typos in reference numbers",
+          "Confirm if PO/invoice numbers were reissued",
+        ],
+      });
+    }
+  }
+
+  // Date analysis
+  const dateRule = rules.find(r => r.type === "date");
+  if (dateRule) {
+    const valA = docA.extracted_fields?.[dateRule.side_a_field];
+    const valB = docB.extracted_fields?.[dateRule.side_b_field];
+    const dA = parseDate(valA);
+    const dB = parseDate(valB);
+    if (dA && dB) {
+      const dd = daysBetween(dA, dB);
+      const delta = dateDiffDays(dA, dB);
+      const tol = dateRule.tolerance || 7;
+      report.deterministic_analysis.date = {
+        side_a: valA, side_b: valB,
+        parsed_a: dA.toISOString(), parsed_b: dB.toISOString(),
+        days_difference: dd,
+        direction: delta > 0 ? "b_after_a" : delta < 0 ? "a_after_b" : "same_day",
+        within_tolerance: dd <= tol,
+        tolerance_days: tol,
+        sequence_violation: dateRule.date_direction
+          ? (dateRule.date_direction === "a_before_b" && delta < 0) || (dateRule.date_direction === "b_before_a" && delta > 0)
+          : false,
+        expected_sequence: dateRule.date_direction || null,
+      };
+      if (dd > tol) {
+        report.investigative_notes.push({
+          type: "date_variance",
+          severity: dd <= tol * 2 ? "low" : "medium",
+          narrative: `Dates differ by ${dd} days (tolerance: ${tol}). ${delta > 0 ? "Side B is later." : delta < 0 ? "Side A is later." : ""}`,
+          evidence_paths: [
+            `document_a.extracted_fields.${dateRule.side_a_field}`,
+            `document_b.extracted_fields.${dateRule.side_b_field}`,
+          ],
+          suggested_actions: ["Verify payment processing delays", "Check for backdated or post-dated entries"],
+        });
+      }
+      if (report.deterministic_analysis.date.sequence_violation) {
+        report.investigative_notes.push({
+          type: "date_sequence_violation",
+          severity: "high",
+          narrative: `Date sequence violation detected. Expected: ${dateRule.date_direction}, but dates are out of order.`,
+          evidence_paths: [
+            `document_a.extracted_fields.${dateRule.side_a_field}`,
+            `document_b.extracted_fields.${dateRule.side_b_field}`,
+          ],
+          suggested_actions: ["Verify document dates are correct", "Check for data entry errors in date fields"],
+        });
+      }
+    } else {
+      report.deterministic_analysis.date = {
+        side_a: valA, side_b: valB,
+        parsed_a: !!dA, parsed_b: !!dB,
+        assessment: "One or both dates could not be parsed.",
+      };
+    }
+  }
+
+  // Currency analysis
+  const currencyRule = rules.find(r => r.canon.includes("currency"));
+  if (currencyRule) {
+    const valA = docA.extracted_fields?.[currencyRule.side_a_field];
+    const valB = docB.extracted_fields?.[currencyRule.side_b_field];
+    const match = normalize(valA) === normalize(valB);
+    report.deterministic_analysis.currency = {
+      side_a: valA, side_b: valB,
+      match,
+      assessment: match ? "Currencies match." : `Currency mismatch: ${valA} vs ${valB}.`,
+    };
+    if (!match) {
+      report.investigative_notes.push({
+        type: "currency_mismatch",
+        severity: "critical",
+        narrative: `Currency mismatch detected: ${valA} vs ${valB}. This is a hard stop — amounts cannot be reconciled across currencies without conversion rates.`,
+        evidence_paths: [
+          `document_a.extracted_fields.${currencyRule.side_a_field}`,
+          `document_b.extracted_fields.${currencyRule.side_b_field}`,
+        ],
+        suggested_actions: [
+          "Apply exchange rate conversion before reconciliation",
+          "Verify if multi-currency transaction is intentional",
+          "Check if one side is reporting in functional currency",
+        ],
+      });
+    }
+  }
+
+  // Summary narrative
+  const noteCount = report.investigative_notes.length;
+  if (noteCount === 0) {
+    report.summary_narrative = "All fields align within configured tolerances. This is a clean match.";
+  } else {
+    const severities = report.investigative_notes.map(n => n.severity);
+    const maxSeverity = severities.includes("critical") ? "critical" : severities.includes("high") ? "high" : severities.includes("medium") ? "medium" : "low";
+    report.summary_narrative = `Match requires review. ${noteCount} anomaly${noteCount > 1 ? "ies" : "y"} detected with maximum severity: ${maxSeverity}.`;
+  }
+
+  return report;
+}
+
+function findSubsetSum(items, target, tolAbs, amountField, rules, targetDoc, targetSide = "B", strictRef = false) {
+  const referenceRule = rules.find(r => r.type === "reference" && r.is_gate);
+  const vendorRule = rules.find(r => (r.canon.includes("vendor") || r.canon.includes("supplier") || r.canon.includes("payee")) && r.weight >= 0.1);
+
+  const targetRef = referenceRule ? normalize(targetDoc.extracted_fields?.[targetSide === "A" ? referenceRule.side_a_field : referenceRule.side_b_field]) : null;
+  const targetVen = vendorRule ? normalize(targetDoc.extracted_fields?.[targetSide === "A" ? vendorRule.side_a_field : vendorRule.side_b_field]) : null;
+
+  log("debug", "subset_sum_start", { target, tolerance: tolAbs, amountField, strictRef, targetVen, targetRef, poolSize: items.length });
+
+  const valid = items.map(it => ({
+    it,
+    amt: (parseMoney(it.extracted_fields?.[amountField]) || { cents: 0 }).cents / 100,
+    ref: referenceRule ? normalize(it.extracted_fields?.[targetSide === "A" ? referenceRule.side_b_field : referenceRule.side_a_field]) : null,
+    ven: vendorRule ? normalize(it.extracted_fields?.[targetSide === "A" ? vendorRule.side_b_field : vendorRule.side_a_field]) : null,
+  })).filter(x => {
+    if (x.amt <= 0) return false;
+    if (targetVen && x.ven) {
+      const sim = similarity(targetVen, x.ven);
+      if (sim < 0.8) {
+        log("debug", "subset_sum_vendor_filtered", { doc: x.it.document_name, ven: x.ven, sim });
         return false;
       }
-      return true;
-    })
-    .sort((a, b) => b.amt - a.amt);
+    }
+    if (strictRef && targetRef && x.ref && x.ref !== targetRef) {
+      log("debug", "subset_sum_ref_filtered", { doc: x.it.document_name, ref: x.ref });
+      return false;
+    }
+    return true;
+  }).sort((a, b) => b.amt - a.amt);
 
-  console.log(`[findSubsetSum] valid pool after filter=${valid.length}`);
-  valid.forEach((v, i) => console.log(`  [${i}] ${v.it.document_name}: amt=${v.amt}, ref=${v.ref}, ven=${v.ven}`));
+  log("debug", "subset_sum_valid_pool", { count: valid.length });
 
-  // 1. Greedy
   const greedy = [];
   let remaining = target;
   for (const x of valid) {
@@ -602,53 +822,48 @@ function findSubsetSum(items, target, tolAbs, amountField, rules, targetDoc, tar
       remaining -= x.amt;
     }
   }
-  console.log(`[findSubsetSum] greedy result: picked=${greedy.length}, remaining=${remaining}`);
   if (greedy.length > 1 && Math.abs(remaining) <= tolAbs) {
-    console.log(`[findSubsetSum] returning greedy match`);
+    log("debug", "subset_sum_greedy_match", { picked: greedy.length, remaining });
     return greedy;
   }
 
-  // 2. Pairs
   for (let i = 0; i < valid.length; i++) {
     for (let j = i + 1; j < valid.length; j++) {
       const sum = valid[i].amt + valid[j].amt;
       if (Math.abs(target - sum) <= tolAbs) {
-        console.log(`[findSubsetSum] returning pair: ${valid[i].it.document_name} + ${valid[j].it.document_name} = ${sum}`);
+        log("debug", "subset_sum_pair_match", { i: valid[i].it.document_name, j: valid[j].it.document_name, sum });
         return [valid[i].it, valid[j].it];
       }
     }
   }
 
-  // 3. Triples
   for (let i = 0; i < valid.length; i++) {
     for (let j = i + 1; j < valid.length; j++) {
       for (let k = j + 1; k < valid.length; k++) {
         const sum = valid[i].amt + valid[j].amt + valid[k].amt;
         if (Math.abs(target - sum) <= tolAbs) {
-          console.log(`[findSubsetSum] returning triple`);
+          log("debug", "subset_sum_triple_match");
           return [valid[i].it, valid[j].it, valid[k].it];
         }
       }
     }
   }
 
-  console.log(`[findSubsetSum] no subset found`);
+  log("debug", "subset_sum_no_match");
   return null;
 }
 
-// ─── Enhanced Matching with Classification + Near-Miss + Rejected Candidates ─
 function findMatches(docsA, docsB, rules, sumConfig) {
   const docAMatched = new Set();
   const docBMatched = new Set();
   const matches = [];
   const rejectedCandidates = [];
-  const permanentlyRejected = new Set(); // "A:id-B:id" pairs that are hard-rejected
+  const permanentlyRejected = new Set();
 
-  // Phase 1: Confident 1:1 matches (score >= 90 AND classification = matched)
+  // Phase 1: Confident 1:1 matches
   for (const a of docsA) {
     if (docAMatched.has(a.id)) continue;
     let best = null, bestScore = 0, bestResult = null;
-
     for (const b of docsB) {
       if (docBMatched.has(b.id)) continue;
       const result = scorePair(a, b, rules);
@@ -658,20 +873,18 @@ function findMatches(docsA, docsB, rules, sumConfig) {
         bestResult = result;
       }
     }
-
     if (best && bestScore >= 90) {
       const classification = classifyMatch(bestScore, bestResult.gateScore, bestResult.gateFailures, bestResult.warnings, bestResult.allGatesPresent);
-      if (classification.status === 'matched') {
+      if (classification.status === "matched") {
+        const report = buildInvestigativeReport(a, best, bestResult, rules, classification);
         matches.push({
-          docA_id: a.id,
-          docB_id: best.id,
-          type: classification.type,
-          status: classification.status,
-          score: bestScore,
+          docA_id: a.id, docB_id: best.id,
+          type: classification.type, status: classification.status, score: bestScore,
           reasons: bestResult.reasons,
           gate_failures: bestResult.gateFailures,
           warnings: bestResult.warnings,
-          field_results: bestResult.fieldResults
+          field_results: bestResult.fieldResults,
+          investigative_report: report,
         });
         docAMatched.add(a.id);
         docBMatched.add(best.id);
@@ -679,32 +892,42 @@ function findMatches(docsA, docsB, rules, sumConfig) {
     }
   }
 
-  // Phase 2: 1:N Sum matching (strictRef = false for consolidated payments)
+  // Phase 2: 1:N Sum matching
   if (sumConfig?.enabled && sumConfig.side_a_amount_field && sumConfig.side_b_amount_field) {
-    console.log(`[Phase 2] 1:N sum matching enabled. A amount field=${sumConfig.side_a_amount_field}, B amount field=${sumConfig.side_b_amount_field}`);
+    log("debug", "phase_2_sum_matching_start", { aField: sumConfig.side_a_amount_field, bField: sumConfig.side_b_amount_field });
     for (const a of docsA) {
       if (docAMatched.has(a.id)) continue;
-      const target = parseNumeric(a.extracted_fields?.[sumConfig.side_a_amount_field]) || 0;
+      const targetMoney = parseMoney(a.extracted_fields?.[sumConfig.side_a_amount_field]);
+      const target = targetMoney ? targetMoney.cents / 100 : 0;
       if (!target) continue;
-
       const pool = docsB.filter(b => !docBMatched.has(b.id));
       const tolPct = (sumConfig.tolerance_percent || 0) / 100;
       const tolAbs = target * tolPct + 0.01;
-
-      console.log(`[Phase 2] Trying to match ${a.document_name} (target=${target}) against ${pool.length} B items`);
-      const subset = findSubsetSum(pool, target, tolAbs, sumConfig.side_b_amount_field, rules, a, 'A', false);
+      log("debug", "phase_2_attempt", { doc: a.document_name, target, poolSize: pool.length });
+      const subset = findSubsetSum(pool, target, tolAbs, sumConfig.side_b_amount_field, rules, a, "A", false);
       if (subset) {
-        console.log(`[Phase 2] Found subset for ${a.document_name}: ${subset.length} items`);
+        log("debug", "phase_2_match", { doc: a.document_name, subsetCount: subset.length });
         for (const b of subset) {
           matches.push({
-            docA_id: a.id,
-            docB_id: b.id,
-            type: "partial_sum",
-            status: "review",
-            score: 85,
+            docA_id: a.id, docB_id: b.id,
+            type: "partial_sum", status: "review", score: 85,
             reasons: { amount_sum: true, item_count: subset.length },
-            gate_failures: [],
-            warnings: []
+            gate_failures: [], warnings: [],
+            investigative_report: {
+              verdict: "review", confidence: "medium", match_type: "partial_sum",
+              summary_narrative: `Invoice of ${targetMoney.formatted} matched against ${subset.length} partial payments totaling approximately the same amount.`,
+              deterministic_analysis: {
+                amount: {
+                  side_a: { raw: a.extracted_fields?.[sumConfig.side_a_amount_field], formatted: targetMoney.formatted },
+                  side_b: { item_count: subset.length, note: "Multiple payments combined" },
+                },
+              },
+              investigative_notes: [{
+                type: "partial_payment", severity: "medium",
+                narrative: `This invoice appears to have been paid in ${subset.length} installments. Verify all payment references align.`,
+                suggested_actions: ["Cross-check each payment reference", "Verify no duplicate payments included"],
+              }],
+            },
           });
           docBMatched.add(b.id);
         }
@@ -713,32 +936,42 @@ function findMatches(docsA, docsB, rules, sumConfig) {
     }
   }
 
-  // Phase 3: N:1 Sum matching (strictRef = false)
+  // Phase 3: N:1 Sum matching
   if (sumConfig?.enabled && sumConfig.side_a_amount_field && sumConfig.side_b_amount_field) {
-    console.log(`[Phase 3] N:1 sum matching enabled`);
+    log("debug", "phase_3_sum_matching_start");
     for (const b of docsB) {
       if (docBMatched.has(b.id)) continue;
-      const target = parseNumeric(b.extracted_fields?.[sumConfig.side_b_amount_field]) || 0;
+      const targetMoney = parseMoney(b.extracted_fields?.[sumConfig.side_b_amount_field]);
+      const target = targetMoney ? targetMoney.cents / 100 : 0;
       if (!target) continue;
-
       const pool = docsA.filter(a => !docAMatched.has(a.id));
       const tolPct = (sumConfig.tolerance_percent || 0) / 100;
       const tolAbs = target * tolPct + 0.01;
-
-      console.log(`[Phase 3] Trying to match ${b.document_name} (target=${target}) against ${pool.length} A items`);
-      const subset = findSubsetSum(pool, target, tolAbs, sumConfig.side_a_amount_field, rules, b, 'B', false);
+      log("debug", "phase_3_attempt", { doc: b.document_name, target, poolSize: pool.length });
+      const subset = findSubsetSum(pool, target, tolAbs, sumConfig.side_a_amount_field, rules, b, "B", false);
       if (subset) {
-        console.log(`[Phase 3] Found subset for ${b.document_name}: ${subset.length} items`);
+        log("debug", "phase_3_match", { doc: b.document_name, subsetCount: subset.length });
         for (const a of subset) {
           matches.push({
-            docA_id: a.id,
-            docB_id: b.id,
-            type: "split",
-            status: "review",
-            score: 80,
+            docA_id: a.id, docB_id: b.id,
+            type: "split", status: "review", score: 80,
             reasons: { amount_split: true, item_count: subset.length },
-            gate_failures: [],
-            warnings: []
+            gate_failures: [], warnings: [],
+            investigative_report: {
+              verdict: "review", confidence: "medium", match_type: "split",
+              summary_narrative: `Payment of ${targetMoney.formatted} appears to cover ${subset.length} invoices.`,
+              deterministic_analysis: {
+                amount: {
+                  side_a: { item_count: subset.length, note: "Multiple invoices combined" },
+                  side_b: { raw: b.extracted_fields?.[sumConfig.side_b_amount_field], formatted: targetMoney.formatted },
+                },
+              },
+              investigative_notes: [{
+                type: "consolidated_payment", severity: "medium",
+                narrative: `This payment covers multiple invoices. Ensure each invoice is correctly allocated.`,
+                suggested_actions: ["Verify invoice allocation matches payment", "Check for unallocated balances"],
+              }],
+            },
           });
           docAMatched.add(a.id);
         }
@@ -747,11 +980,10 @@ function findMatches(docsA, docsB, rules, sumConfig) {
     }
   }
 
-  // Phase 4: Fuzzy / Review candidates (score 60-89)
+  // Phase 4: Fuzzy / Review candidates
   for (const a of docsA) {
     if (docAMatched.has(a.id)) continue;
     let best = null, bestScore = 0, bestResult = null;
-
     for (const b of docsB) {
       if (docBMatched.has(b.id)) continue;
       const pairKey = `${a.id}-${b.id}`;
@@ -763,44 +995,37 @@ function findMatches(docsA, docsB, rules, sumConfig) {
         bestResult = result;
       }
     }
-
     if (best && bestScore >= 60) {
       const classification = classifyMatch(bestScore, bestResult.gateScore, bestResult.gateFailures, bestResult.warnings, bestResult.allGatesPresent);
-      if (classification.status !== 'unmatched') {
+      if (classification.status !== "unmatched") {
+        const report = buildInvestigativeReport(a, best, bestResult, rules, classification);
         matches.push({
-          docA_id: a.id,
-          docB_id: best.id,
-          type: classification.type,
-          status: classification.status,
-          score: bestScore,
+          docA_id: a.id, docB_id: best.id,
+          type: classification.type, status: classification.status, score: bestScore,
           reasons: bestResult.reasons,
           gate_failures: bestResult.gateFailures,
           warnings: bestResult.warnings,
-          field_results: bestResult.fieldResults
+          field_results: bestResult.fieldResults,
+          investigative_report: report,
         });
         docAMatched.add(a.id);
         docBMatched.add(best.id);
       } else {
         permanentlyRejected.add(`${a.id}-${best.id}`);
         rejectedCandidates.push({
-          doc_id: a.id,
-          doc_side: 'A',
-          candidate_id: best.id,
-          candidate_side: 'B',
-          score: bestScore,
-          reason: classification.type,
+          doc_id: a.id, doc_side: "A",
+          candidate_id: best.id, candidate_side: "B",
+          score: bestScore, reason: classification.type,
           gate_failures: bestResult.gateFailures,
-          warnings: bestResult.warnings
+          warnings: bestResult.warnings,
         });
       }
     }
   }
 
-  // Phase 5: Near-miss surfacing (score 40-59) — tries next-best after hard rejects
+  // Phase 5: Near-miss surfacing
   for (const a of docsA) {
     if (docAMatched.has(a.id)) continue;
-
-    // Collect all candidates sorted by score, excluding already-matched and permanently-rejected
     const candidates = [];
     for (const b of docsB) {
       if (docBMatched.has(b.id)) continue;
@@ -810,46 +1035,40 @@ function findMatches(docsA, docsB, rules, sumConfig) {
       candidates.push({ b, score: result.score, result });
     }
     candidates.sort((x, y) => y.score - x.score);
-
     for (const cand of candidates) {
       if (cand.score < 40) break;
       const classification = classifyMatch(cand.score, cand.result.gateScore, cand.result.gateFailures, cand.result.warnings, cand.result.allGatesPresent);
-      if (classification.status !== 'unmatched') {
+      if (classification.status !== "unmatched") {
+        const report = buildInvestigativeReport(a, cand.b, cand.result, rules, classification);
         matches.push({
-          docA_id: a.id,
-          docB_id: cand.b.id,
-          type: classification.type,
-          status: classification.status,
-          score: cand.score,
+          docA_id: a.id, docB_id: cand.b.id,
+          type: classification.type, status: classification.status, score: cand.score,
           reasons: cand.result.reasons,
           gate_failures: cand.result.gateFailures,
           warnings: cand.result.warnings,
-          field_results: cand.result.fieldResults
+          field_results: cand.result.fieldResults,
+          investigative_report: report,
         });
         docAMatched.add(a.id);
         docBMatched.add(cand.b.id);
-        break; // found a viable near-miss
+        break;
       } else {
         permanentlyRejected.add(`${a.id}-${cand.b.id}`);
         rejectedCandidates.push({
-          doc_id: a.id,
-          doc_side: 'A',
-          candidate_id: cand.b.id,
-          candidate_side: 'B',
-          score: cand.score,
-          reason: classification.type,
+          doc_id: a.id, doc_side: "A",
+          candidate_id: cand.b.id, candidate_side: "B",
+          score: cand.score, reason: classification.type,
           gate_failures: cand.result.gateFailures,
-          warnings: cand.result.warnings
+          warnings: cand.result.warnings,
         });
       }
     }
   }
 
-  // Also capture rejected candidates for unmatched B docs
+  // Capture rejected candidates for unmatched B docs
   for (const b of docsB) {
     if (docBMatched.has(b.id)) continue;
     let best = null, bestScore = 0, bestResult = null;
-
     for (const a of docsA) {
       if (docAMatched.has(a.id)) continue;
       const pairKey = `${a.id}-${b.id}`;
@@ -861,17 +1080,14 @@ function findMatches(docsA, docsB, rules, sumConfig) {
         bestResult = result;
       }
     }
-
     if (best) {
       rejectedCandidates.push({
-        doc_id: b.id,
-        doc_side: 'B',
-        candidate_id: best.id,
-        candidate_side: 'A',
+        doc_id: b.id, doc_side: "B",
+        candidate_id: best.id, candidate_side: "A",
         score: bestScore,
-        reason: bestScore >= 40 ? classifyMatch(bestScore, bestResult.gateScore, bestResult.gateFailures, bestResult.warnings, bestResult.allGatesPresent).type : 'score_too_low',
+        reason: bestScore >= 40 ? classifyMatch(bestScore, bestResult.gateScore, bestResult.gateFailures, bestResult.warnings, bestResult.allGatesPresent).type : "score_too_low",
         gate_failures: bestResult.gateFailures,
-        warnings: bestResult.warnings
+        warnings: bestResult.warnings,
       });
     }
   }
@@ -879,27 +1095,27 @@ function findMatches(docsA, docsB, rules, sumConfig) {
   return { matches, docAMatched, docBMatched, rejectedCandidates };
 }
 
-// ─── Main Handler ─────────────────────────────────────────
 exports.handler = async (event, context) => {
   if (event.httpMethod === "OPTIONS") return ok({});
-  if (event.httpMethod !== "POST") return err(405, "Method not allowed");
+  if (event.httpMethod !== "POST") return err(405, "METHOD_NOT_ALLOWED", "Method not allowed");
 
   let workspaceLocked = false;
-  let workspace_id;
+  let workspace_id = null;
 
   try {
     const auth = await getUser(event);
-    if (auth.error) return err(auth.status, auth.error);
-    const userId = auth.user.id;
+    const userId = auth.id;
 
     let body;
     try {
       body = JSON.parse(event.body || "{}");
     } catch (parseErr) {
-      return err(400, "Invalid JSON body");
+      return err(400, "INVALID_JSON", "Invalid JSON body");
     }
-    ({ workspace_id } = body);
-    if (!workspace_id) return err(400, "workspace_id required");
+
+    workspace_id = body.workspace_id;
+    const uuidCheck = validateUUID(workspace_id, "workspace_id");
+    if (!uuidCheck.valid) return err(400, "VALIDATION_ERROR", uuidCheck.error);
 
     const { data: ws } = await supabase
       .from("reconciliation_workspaces")
@@ -907,18 +1123,64 @@ exports.handler = async (event, context) => {
       .eq("id", workspace_id)
       .eq("user_id", userId)
       .single();
-    if (!ws) return err(404, "Workspace not found");
+    if (!ws) return err(404, "NOT_FOUND", "Workspace not found");
 
-    // Lock workspace (idempotent)
-    const { data: lockData } = await supabase.rpc("lock_workspace_for_processing", { p_workspace_id: workspace_id });
-    if (!lockData) {
-      return err(409, "Workspace is already processing or not found");
+    // Idempotency: check for recent run
+    const idempotencyKey = body.idempotency_key;
+    if (idempotencyKey) {
+      const { data: existingRun } = await supabase
+        .from("reconciliation_runs")
+        .select("id, status, created_at")
+        .eq("workspace_id", workspace_id)
+        .eq("idempotency_key", idempotencyKey)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single();
+
+      if (existingRun) {
+        const ageMinutes = (Date.now() - new Date(existingRun.created_at).getTime()) / 60000;
+        if (ageMinutes < 30) {
+          log("info", "idempotent_return", { runId: existingRun.id, ageMinutes });
+          return ok({ success: true, idempotent: true, run_id: existingRun.id });
+        }
+      }
+    }
+
+    // Lock workspace using dedicated is_processing flag with timeout recovery
+    const lockTimeout = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const { data: lockData, error: lockErr } = await supabase
+      .from("reconciliation_workspaces")
+      .update({ is_processing: true, processing_started_at: new Date().toISOString() })
+      .eq("id", workspace_id)
+      .eq("user_id", userId)
+      .or(`is_processing.eq.false,processing_started_at.lt.${lockTimeout}`)
+      .select("id")
+      .single();
+
+    if (lockErr || !lockData) {
+      log("warn", "workspace_lock_failed", { workspace_id, error: lockErr?.message });
+      return err(409, "ALREADY_PROCESSING", "Workspace is already processing or lock could not be acquired");
     }
     workspaceLocked = true;
 
-    // Clear old matches
+    // Record run start
+    const { data: runRecord } = await supabase
+      .from("reconciliation_runs")
+      .insert({
+        workspace_id,
+        user_id: userId,
+        idempotency_key: idempotencyKey || null,
+        status: "running",
+      })
+      .select()
+      .single();
+
+    // Clear old matches and reset statuses
     await supabase.from("reconciliation_matches").delete().eq("workspace_id", workspace_id);
-    await supabase.from("reconciliation_documents").update({ status: "unmatched", match_score: null }).eq("workspace_id", workspace_id);
+    await supabase
+      .from("reconciliation_documents")
+      .update({ status: "unmatched", match_score: null })
+      .eq("workspace_id", workspace_id);
 
     // Fetch both sides
     const { data: sideA } = await supabase
@@ -951,7 +1213,8 @@ exports.handler = async (event, context) => {
     const normalizedSideB = (sideB || []).map(normalizeDoc);
 
     if (!sideA?.length || !sideB?.length) {
-      await supabase.from("reconciliation_workspaces").update({ status: "completed" }).eq("id", workspace_id);
+      await supabase.from("reconciliation_workspaces").update({ status: "completed", is_processing: false, processing_started_at: null }).eq("id", workspace_id);
+      await supabase.from("reconciliation_runs").update({ status: "completed", completed_at: new Date().toISOString() }).eq("id", runRecord.id);
       return ok({ message: "Both sides need data to reconcile", summary: ws.summary });
     }
 
@@ -962,11 +1225,24 @@ exports.handler = async (event, context) => {
       const aFields = [...new Set(normalizedSideA.flatMap(d => Object.keys(d.extracted_fields || {})))];
       const bFields = [...new Set(normalizedSideB.flatMap(d => Object.keys(d.extracted_fields || {})))];
       config = autoGenerateMatchConfig(aFields, bFields, aliasMap, normalizedSideA, normalizedSideB);
+
+      const configValid = validateConfig(config);
+      if (!configValid.valid) {
+        log("error", "auto_config_invalid", { error: configValid.error });
+        throw new ReconciliationError("CONFIG_ERROR", configValid.error);
+      }
+
       await supabase.from("reconciliation_workspaces").update({ match_configuration: config }).eq("id", workspace_id);
     }
 
-    console.log("[reconcile-run] Config rules:", config.rules.map(r => ({ canon: r.canonical, a: r.side_a_field, b: r.side_b_field, type: r.type, weight: r.weight, is_gate: r.is_gate })));
-    console.log("[reconcile-run] Sum matching:", config.sum_matching);
+    log("info", "reconcile_start", {
+      workspace_id,
+      run_id: runRecord.id,
+      sideACount: normalizedSideA.length,
+      sideBCount: normalizedSideB.length,
+      ruleCount: config.rules.length,
+      sumMatching: config.sum_matching?.enabled,
+    });
 
     const { matches, docAMatched, docBMatched, rejectedCandidates } = findMatches(
       normalizedSideA,
@@ -975,12 +1251,15 @@ exports.handler = async (event, context) => {
       config.sum_matching || {}
     );
 
-    console.log("[reconcile-run] Matches created:", matches.length);
-    matches.forEach(m => console.log(`  - ${m.docA_id} <-> ${m.docB_id}: ${m.type} (${m.score}%)`));
-    console.log("[reconcile-run] Unmatched A:", normalizedSideA.filter(d => !docAMatched.has(d.id)).map(d => d.document_name));
-    console.log("[reconcile-run] Unmatched B:", normalizedSideB.filter(d => !docBMatched.has(d.id)).map(d => d.document_name));
+    log("info", "reconcile_complete", {
+      workspace_id,
+      run_id: runRecord.id,
+      matches: matches.length,
+      unmatchedA: normalizedSideA.filter(d => !docAMatched.has(d.id)).length,
+      unmatchedB: normalizedSideB.filter(d => !docBMatched.has(d.id)).length,
+    });
 
-    // Write matches with snapshots
+    // Write matches with snapshots and investigative reports
     const docAMap = new Map(normalizedSideA.map(d => [d.id, d]));
     const docBMap = new Map(normalizedSideB.map(d => [d.id, d]));
 
@@ -998,11 +1277,13 @@ exports.handler = async (event, context) => {
         warnings: m.warnings || [],
         document_a_snapshot: docAMap.get(m.docA_id)?.extracted_fields || null,
         document_b_snapshot: docBMap.get(m.docB_id)?.extracted_fields || null,
+        investigative_report: m.investigative_report || null,
       }));
+
       const { error: insErr } = await supabase.from("reconciliation_matches").insert(inserts);
       if (insErr) {
-        console.error("match insert error:", insErr.message);
-        return err(500, "Failed to save match results: " + insErr.message);
+        log("error", "match_insert_failed", { error: insErr.message });
+        throw new ReconciliationError("INSERT_ERROR", "Failed to save match results: " + insErr.message);
       }
     }
 
@@ -1019,7 +1300,6 @@ exports.handler = async (event, context) => {
       }
     }
 
-    // Batch update by (status, score) groups
     const updateGroups = new Map();
     for (const [id, val] of [...aStatusMap, ...bStatusMap]) {
       const key = `${val.status}:${val.score}`;
@@ -1033,12 +1313,12 @@ exports.handler = async (event, context) => {
         .update({ status: group.status, match_score: group.score })
         .in("id", group.ids);
       if (upErr) {
-        console.error("bulk doc update error:", upErr.message);
-        return err(500, "Failed to update document statuses: " + upErr.message);
+        log("error", "bulk_doc_update_failed", { error: upErr.message });
+        throw new ReconciliationError("UPDATE_ERROR", "Failed to update document statuses: " + upErr.message);
       }
     }
 
-    // Summary (based on Side A)
+    // Summary
     const { data: allDocs } = await supabase.from("reconciliation_documents").select("status, dataset_side").eq("workspace_id", workspace_id);
     const aDocs = allDocs.filter(d => d.dataset_side === "A");
     const summary = {
@@ -1049,9 +1329,12 @@ exports.handler = async (event, context) => {
       total: aDocs.length,
     };
 
-    await supabase.from("reconciliation_workspaces").update({ status: "completed", summary }).eq("id", workspace_id);
+    await supabase.from("reconciliation_workspaces").update({ status: "completed", summary, is_processing: false, processing_started_at: null }).eq("id", workspace_id);
+    await supabase.from("reconciliation_runs").update({ status: "completed", completed_at: new Date().toISOString() }).eq("id", runRecord.id);
+
     return ok({
       success: true,
+      run_id: runRecord.id,
       summary,
       matches_created: matches.length,
       configuration: config,
@@ -1063,19 +1346,30 @@ exports.handler = async (event, context) => {
         score: rc.score,
         reason: rc.reason,
         gate_failures: rc.gate_failures,
-        warnings: rc.warnings
-      }))
+        warnings: rc.warnings,
+      })),
     });
 
   } catch (e) {
-    console.error("reconcile-run error:", e);
-    return err(500, e.message || "Internal error during reconciliation");
+    log("error", "reconcile_run_error", {
+      workspace_id,
+      error: e.message,
+      code: e.code || "UNKNOWN",
+      stack: IS_PROD ? undefined : e.stack,
+    });
+
+    if (workspaceLocked && workspace_id) {
+      await supabase.from("reconciliation_workspaces").update({ status: "error", is_processing: false, processing_started_at: null }).eq("id", workspace_id);
+      await supabase.from("reconciliation_runs").update({ status: "failed", error_message: e.message, completed_at: new Date().toISOString() }).eq("workspace_id", workspace_id).eq("status", "running");
+    }
+
+    if (e instanceof ReconciliationError) {
+      return err(e.recoverable ? 400 : 500, e.code, e.message);
+    }
+    return err(500, "INTERNAL_ERROR", e.message || "Internal error during reconciliation");
   } finally {
-    if (workspaceLocked) {
-      await supabase
-        .from("reconciliation_workspaces")
-        .update({ status: "open" })
-        .eq("id", workspace_id);
+    if (workspaceLocked && workspace_id) {
+      await supabase.from("reconciliation_workspaces").update({ is_processing: false, processing_started_at: null }).eq("id", workspace_id);
     }
   }
 };

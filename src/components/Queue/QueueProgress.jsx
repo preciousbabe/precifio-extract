@@ -1,50 +1,44 @@
 // src/components/Queue/QueueProgress.jsx
-// Progress bar for the currently processing document.
-
 import React from "react";
 
-export default function QueueProgress({
-  progress = 0,
-  status = "queued"
-}) {
+export default function QueueProgress({ progress = 0, status = "queued" }) {
   const percent =
-  status === "completed"
-    ? 100
-    : status === "failed"
-      ? Math.min(99, Math.max(0, Math.round(progress)))
-      : Math.max(0, Math.min(99, Math.round(progress)));
+    status === "completed"
+      ? 100
+      : status === "failed"
+        ? Math.min(99, Math.max(0, Math.round(progress)))
+        : Math.max(0, Math.min(99, Math.round(progress)));
 
   const getStatusText = () => {
-    switch (status) {
-      case "uploading":
-        return "Uploading file...";
-      case "sending":
-        return "Sending to server...";
-      case "processing":
-        return "Processing document...";
-      case "extracting":
-        return "Extracting text...";
-      case "ocr":
-        return "Running OCR...";
-      case "ai":
-        return "Analyzing with AI...";
-      case "saving":
-        return "Saving result...";
-        case "recovering":
-  return "Recovering saved result...";
-      case "completed":
-        return "Completed";
+  switch (status) {
+    case "uploading":
+      return "Uploading file...";
+    case "sending":
+      return "Sending to server...";
+    case "processing":
+      return "Processing on secure server...";
+    case "extracting":
+      return "Extracting text...";
+    case "ocr":
+      return "Running OCR...";
+    case "ai":
+      return "Analyzing with AI...";
+    case "saving":
+      return "Saving result...";
+    case "recovering":
+      return "Checking for completed result on server...";
+    case "completed":
+      return "Completed";
     case "failed":
-     return "Request interrupted — result may still be available";
-      default:
-        return "Waiting in queue...";
-    }
-  };
+      return "Request interrupted — result may still be available";
+    default:
+      return "Waiting in queue...";
+  }
+};
 
-  const getStatusClass = () => {
+const getStatusClass = () => {
   if (status === "failed") return "failed";
   if (status === "completed") return "completed";
-
   if (
     status === "processing" ||
     status === "uploading" ||
@@ -57,19 +51,16 @@ export default function QueueProgress({
   ) {
     return "active";
   }
-
   return "";
 };
+
+  
 
   return (
     <div className="queue-progress">
       <div className="queue-progress-header">
-        <span className="queue-progress-label">
-          {getStatusText()}
-        </span>
-        <span className="queue-progress-percent">
-          {percent}%
-        </span>
+        <span className="queue-progress-label">{getStatusText()}</span>
+        <span className="queue-progress-percent">{percent}%</span>
       </div>
 
       <div className="queue-progress-track">
@@ -78,6 +69,12 @@ export default function QueueProgress({
           style={{ width: `${percent}%` }}
         />
       </div>
+
+      {status === "processing" && (
+        <div className="queue-progress-hint">
+          Wait a bit — extraction in progress.
+        </div>
+      )}
     </div>
   );
 }
