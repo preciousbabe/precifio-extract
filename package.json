@@ -11,6 +11,7 @@
   "dependencies": {
     "@napi-rs/canvas": "^1.0.2",
     "@supabase/supabase-js": "^2.110.1",
+    "@vitejs/plugin-react": "^6.0.1",
     "adm-zip": "^0.5.17",
     "docx": "^9.7.1",
     "exceljs": "^4.4.0",
@@ -27,13 +28,12 @@
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "tesseract.js": "^5.1.1",
+    "vite": "^8.0.12",
     "xlsx": "^0.18.5",
     "xml2js": "^0.6.2"
   },
   "devDependencies": {
     "@types/react": "^19.2.14",
-    "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^6.0.1",
-    "vite": "^8.0.12"
+    "@types/react-dom": "^19.2.3"
   }
 }
