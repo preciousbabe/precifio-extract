@@ -97,7 +97,7 @@ exports.handler = async (event, context) => {
       file.buffer.toString("base64").slice(0, 8000) + (userId || guestId || "guest")
     ).digest("hex");
 
-    // ── Guest limits (fail fast) ──
+        // ── Guest limits (fail fast) ──
     if (isGuest) {
       if (!guestId) {
         return { statusCode: 400, headers, body: JSON.stringify({ error: "Guest ID required", code: "GUEST_ID_MISSING", isGuest: true }) };
@@ -130,7 +130,6 @@ exports.handler = async (event, context) => {
         };
       }
 
-
       const { data: guestRecord } = await supabase.from("guest_extractions").select("extraction_count, first_used").eq("guest_id", guestId).maybeSingle();
       const extractionCount = guestRecord ? guestRecord.extraction_count : 0;
       const daysActive = guestRecord ? (Date.now() - new Date(guestRecord.first_used).getTime()) / (1000 * 60 * 60 * 24) : 0;
@@ -141,12 +140,22 @@ exports.handler = async (event, context) => {
       if (extractionCount >= 1) {
         return { statusCode: 402, headers, body: JSON.stringify({ error: "Free extraction used (1/1). Sign up for more.", code: "GUEST_LIMIT_REACHED", isGuest: true }) };
       }
+
+      // ── CRITICAL: Mark as used IMMEDIATELY so parallel/sequential uploads are blocked ──
       if (!guestRecord) {
         await supabase.from("guest_extractions").insert({
-          guest_id: guestId, ip_address: clientIp, device_fingerprint: deviceFingerprint, 
-           extraction_count: 0,
-          first_used: new Date().toISOString(), last_used: new Date().toISOString(),
+          guest_id: guestId,
+          ip_address: clientIp,
+          device_fingerprint: deviceFingerprint,
+          extraction_count: 1,        // ← Used NOW, not after background finishes
+          first_used: new Date().toISOString(),
+          last_used: new Date().toISOString(),
         });
+      } else {
+        await supabase.from("guest_extractions").update({
+          extraction_count: 1,        // ← Used NOW
+          last_used: new Date().toISOString(),
+        }).eq("guest_id", guestId);
       }
     }
 

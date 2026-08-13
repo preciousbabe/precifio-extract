@@ -1,18 +1,17 @@
-// src/components/AuthModal.jsx
+import { createPortal } from 'react-dom';
 import { useAuth } from '../hooks/useAuth';
 import { Auth } from './Auth';
 
 export default function AuthModal() {
-  const { showAuthModal, setShowAuthModal, authModalMode } = useAuth();
+  const { showAuthModal, setShowAuthModal, authModalMode, authModalMessage } = useAuth();
 
-  // NEW: pull token stored by App.jsx when user lands from reset email
   const resetToken = typeof window !== 'undefined'
     ? localStorage.getItem('precifio_reset_token')
     : null;
 
   if (!showAuthModal) return null;
 
-  return (
+  const modal = (
     <div
       style={{
         position: 'fixed',
@@ -21,7 +20,7 @@ export default function AuthModal() {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        zIndex: 50
+        zIndex: 200000
       }}
       onClick={() => setShowAuthModal(false)}
     >
@@ -32,7 +31,8 @@ export default function AuthModal() {
           padding: '24px',
           maxWidth: '480px',
           width: '90%',
-          position: 'relative'
+          position: 'relative',
+          zIndex: 200001
         }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -52,9 +52,10 @@ export default function AuthModal() {
           ×
         </button>
 
-        {/* NEW: pass resetToken through */}
-        <Auth initialMode={authModalMode} resetToken={resetToken} />
+        <Auth initialMode={authModalMode} resetToken={resetToken} featureMessage={authModalMessage} />
       </div>
     </div>
   );
+
+  return createPortal(modal, document.body);
 }

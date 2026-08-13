@@ -1,11 +1,10 @@
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
-import path from 'path';
+const { defineConfig } = require('vite');
+const react = require('@vitejs/plugin-react');
+const path = require('path');
 
-export default defineConfig({
+module.exports = defineConfig({
   plugins: [
     react(),
-    // ✅ Add this small plugin — rewrites /terms → /terms.html during dev
     {
       name: 'html-routes',
       configureServer(server) {
@@ -31,7 +30,9 @@ export default defineConfig({
     },
   },
   server: {
+    host: true,        // ← ADD THIS
     port: 5173,
+    strictPort: true,
     proxy: {
       '/.netlify/functions': {
         target: 'http://localhost:8888',

@@ -122,8 +122,8 @@ async function resolveFieldAliases(userId) {
 }
 
 function autoGenerateMatchConfig(sideAFields, sideBFields, aliasMap) {
-  const aCanon = sideAFields.map(f => ({ raw: f, canon: canonicalizeFieldName(f, aliasMap) }));
-  const bCanon = sideBFields.map(f => ({ raw: f, canon: canonicalizeFieldName(f, aliasMap) }));
+   const aCanon = sideAFields.filter(f => !String(f).startsWith("__")).map(f => ({ raw: f, canon: canonicalizeFieldName(f, aliasMap) }));
+  const bCanon = sideBFields.filter(f => !String(f).startsWith("__")).map(f => ({ raw: f, canon: canonicalizeFieldName(f, aliasMap) }));
 
   const rules = [];
   const usedB = new Set();

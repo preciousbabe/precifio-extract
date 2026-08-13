@@ -1,5 +1,6 @@
 // netlify/functions/reconcile-run.js
 const { createClient } = require("@supabase/supabase-js");
+const { calculateReconciliationCost, getUserCredits, deductCredits } = require("./lib/credits");
 const core = require("./lib/reconcile-core");
 
 const supabase = createClient(
@@ -157,28 +158,9 @@ exports.handler = async (event, context) => {
       log("warn", "workspace_lock_failed", { workspace_id, error: lockErr?.message });
       return err(409, "ALREADY_PROCESSING", "Workspace is already processing or lock could not be acquired");
     }
-    workspaceLocked = true;
+       workspaceLocked = true;
 
-    // Record run start
-    const { data: runRecord } = await supabase
-      .from("reconciliation_runs")
-      .insert({
-        workspace_id,
-        user_id: userId,
-        idempotency_key: idempotencyKey || null,
-        status: "running",
-      })
-      .select()
-      .single();
-
-    // Clear old matches and reset statuses
-    await supabase.from("reconciliation_matches").delete().eq("workspace_id", workspace_id);
-    await supabase
-      .from("reconciliation_documents")
-      .update({ status: "unmatched", match_score: null })
-      .eq("workspace_id", workspace_id);
-
-    // Fetch both sides
+    // Fetch both sides first (needed for credit check)
     const { data: sideA } = await supabase
       .from("reconciliation_documents")
       .select("*")
@@ -191,7 +173,7 @@ exports.handler = async (event, context) => {
       .eq("dataset_side", "B");
 
     // Normalize nested extracted_fields
-        const normalizeDoc = (doc) => {
+    const normalizeDoc = (doc) => {
       let fields = doc.extracted_fields || {};
       let name = doc.document_name;
       while (
@@ -203,18 +185,57 @@ exports.handler = async (event, context) => {
         name = fields.document_name || name;
         fields = { ...fields.extracted_fields };
       }
-      
-      // Fix 5: Extract embedded references from all text fields
       const allText = Object.values(fields).filter(v => typeof v === "string" && v.length > 3).join(" ");
       const extractedRefs = core.extractEmbeddedReferences(allText);
       if (extractedRefs.length > 0) {
         fields.__extracted_refs = extractedRefs;
       }
-      
       return { ...doc, document_name: name, extracted_fields: fields };
     };
     const normalizedSideA = (sideA || []).map(normalizeDoc);
     const normalizedSideB = (sideB || []).map(normalizeDoc);
+
+    // ─── CREDIT CHECK (fail fast before mutating anything) ───────────────
+    const sideACount = normalizedSideA.length;
+    const sideBCount = normalizedSideB.length;
+    const estimatedCost = calculateReconciliationCost(sideACount, sideBCount, 0);
+    const userBalance = await getUserCredits(supabase, userId);
+
+    if (userBalance < estimatedCost) {
+      await supabase.from("reconciliation_workspaces").update({ is_processing: false, processing_started_at: null }).eq("id", workspace_id);
+      workspaceLocked = false;
+      return err(402, "PAYMENT_REQUIRED", `Insufficient credits. This run requires ~${estimatedCost} credits. Your balance: ${userBalance}.`, { required: estimatedCost, balance: userBalance });
+    }
+
+    // ─── BACKGROUND QUEUE: >500 documents per side ───
+    if (normalizedSideA.length > 500 || normalizedSideB.length > 500) {
+      await supabase.from("reconciliation_runs").update({ status: "queued", estimated_cost: estimatedCost }).eq("id", runRecord.id);
+      await supabase.from("reconciliation_workspaces").update({ is_processing: false, processing_started_at: null }).eq("id", workspace_id);
+      workspaceLocked = false;
+      return ok({ queued: true, message: "Large dataset queued for background processing", run_id: runRecord.id, cost: { estimated: estimatedCost } });
+    }
+
+    // Record run start (now that we know they can afford it)
+    const { data: runRecord, error: runErr } = await supabase
+      .from("reconciliation_runs")
+      .insert({
+        workspace_id,
+        user_id: userId,
+        idempotency_key: idempotencyKey || null,
+        status: "running",
+        estimated_cost: estimatedCost,
+      })
+      .select()
+      .single();
+    if (runErr) throw runErr;
+
+    // Clear old matches and reset statuses
+    await supabase.from("reconciliation_matches").delete().eq("workspace_id", workspace_id);
+    await supabase
+      .from("reconciliation_documents")
+      .update({ status: "unmatched", match_score: null })
+      .eq("workspace_id", workspace_id);
+
 
     // ─── BACKGROUND QUEUE: >500 documents per side ───
     if (normalizedSideA.length > 500 || normalizedSideB.length > 500) {
@@ -240,8 +261,8 @@ exports.handler = async (event, context) => {
     let config = ws.match_configuration;
     if (!config || !config.rules || config.auto_generated) {
       const aliasMap = await resolveFieldAliases(userId);
-      const aFields = [...new Set(normalizedSideA.flatMap(d => Object.keys(d.extracted_fields || {})))];
-      const bFields = [...new Set(normalizedSideB.flatMap(d => Object.keys(d.extracted_fields || {})))];
+      const aFields = [...new Set(normalizedSideA.flatMap(d => Object.keys(d.extracted_fields || {}).filter(k => !k.startsWith("__"))))];
+      const bFields = [...new Set(normalizedSideB.flatMap(d => Object.keys(d.extracted_fields || {}).filter(k => !k.startsWith("__"))))];
       config = core.autoGenerateMatchConfig(aFields, bFields, aliasMap, normalizedSideA, normalizedSideB);
 
       const configValid = core.validateConfig(config);
@@ -367,7 +388,20 @@ exports.handler = async (event, context) => {
       total: aDocs.length,
     };
 
-        await supabase.from("reconciliation_workspaces").update({ status: "completed", summary, is_processing: false, processing_started_at: null, last_rejected_candidates: rejectedCandidates.length > 0 ? rejectedCandidates : null }).eq("id", workspace_id);
+            // ─── DEDUCT ACTUAL CREDITS ────────────────────────────────────────────
+    const actualCost = calculateReconciliationCost(sideACount, sideBCount, matches.length);
+    const deduction = await deductCredits(supabase, userId, actualCost, "reconciliation", runRecord.id, {
+      workspace_id,
+      side_a_count: sideACount,
+      side_b_count: sideBCount,
+      match_count: matches.length,
+    });
+
+    if (!deduction.success) {
+      log("warn", "credit_deduction_failed", { workspace_id, error: deduction.error });
+    }
+
+    await supabase.from("reconciliation_workspaces").update({ status: "completed", summary, is_processing: false, processing_started_at: null, last_rejected_candidates: rejectedCandidates.length > 0 ? rejectedCandidates : null }).eq("id", workspace_id);
     await supabase.from("reconciliation_runs").update({ status: "completed", completed_at: new Date().toISOString() }).eq("id", runRecord.id);
 
     return ok({
@@ -386,6 +420,12 @@ exports.handler = async (event, context) => {
         gate_failures: rc.gate_failures,
         warnings: rc.warnings,
       })),
+      cost: {
+        estimated: estimatedCost,
+        actual: actualCost,
+        deducted: deduction.success,
+        balance_after: deduction.success ? deduction.balance : userBalance,
+      },
     });
 
   } catch (e) {

@@ -4,6 +4,7 @@ const { extractTextFromFile } = require("../services/extractor-service");
 const { cleanOCR } = require("../utils/clean-ocr");
 const AIClient = require("../utils/ai-client");
 const { createClient } = require("@supabase/supabase-js");
+const { deductCredits } = require("../lib/credits");
 const crypto = require("crypto");
 
 function estimateCreditCost(text, fileName = "") {
@@ -268,28 +269,39 @@ exports.handler = async (event, context) => {
     const { error: saveError } = await supabase.from("extractions").update(resultPayload).eq("id", extractionId);
     if (saveError) throw new Error(`Failed to save result: ${saveError.message}`);
 
-    // ── 10. CHARGE CREDITS (after successful save) ──
+        // ── 10. CHARGE CREDITS (after successful save) ──
     let newBalance = null;
     if (!isGuest && userId) {
-      const words = cleanedText.split(/\s+/).filter((w) => w.length > 0).length;
       try {
-        const { data: chargeResult, error: chargeError } = await supabase.rpc("charge_extraction_credits", {
-          p_user_id: userId, p_amount: actualCost, p_extraction_id: extractionId,
-          p_file_name: job.file_name, p_estimated_cost: cost, p_document_type: docType,
-          p_words: words, p_model: config?.ai?.provider || "unknown", p_chars: cleanedText.length,
-        });
-        if (chargeError) throw chargeError;
-        newBalance = chargeResult?.new_balance ?? null;
+        const deduction = await deductCredits(
+          supabase,
+          userId,
+          actualCost,
+          "extraction",
+          extractionId,
+          {
+            file_name: job.file_name,
+            estimated_cost: cost,
+            document_type: docType,
+            words: cleanedText.split(/\s+/).filter((w) => w.length > 0).length,
+            chars: cleanedText.length,
+            model: config?.ai?.provider || "unknown",
+          }
+        );
+        if (deduction.success) {
+          newBalance = deduction.balance;
+        } else {
+          console.error(`Post-save charge failed for ${extractionId}:`, deduction.error);
+        }
       } catch (chargeErr) {
         console.error(`Post-save charge failed for ${extractionId}:`, chargeErr.message);
-        // Log for reconciliation. User got their result for free this time.
       }
     }
-
-    // ── 11. Charge guest after success ──
+    
+       // ── 11. Update guest last_used only (count was set in orchestrator) ──
     if (isGuest && job.guest_id) {
       await supabase.from("guest_extractions").update({
-        extraction_count: 1, last_used: new Date().toISOString(),
+        last_used: new Date().toISOString(),
       }).eq("guest_id", job.guest_id);
     }
 

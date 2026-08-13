@@ -41,7 +41,7 @@ function getAuthHeaders() {
 
 async function pollExistingJob(jobId, onProgress) {
   const POLL_INTERVAL = 3000;
-  const MAX_POLL_TIME = 30000;
+  const MAX_POLL_TIME = 120000;
   const pollUrl = `${API_BASE}/check-job?jobId=${encodeURIComponent(jobId)}`;
   const startTime = Date.now();
 
@@ -102,7 +102,7 @@ async function recoverExistingJob(jobId, onProgress) {
 
 async function uploadWithPoll(url, file, onProgress, jobId = null) {
   const MAX_RETRIES = 3;
-  const FETCH_TIMEOUT = 28000;
+  const FETCH_TIMEOUT = 45000;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     const controller = new AbortController();

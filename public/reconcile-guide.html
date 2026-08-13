@@ -4,20 +4,26 @@
   <meta charset="UTF-8">
   <link rel="icon" type="image/png" href="/favIcon.png" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Precifio Reconcile — How It Works</title>
+  <title>Precifio Reconcile — Complete Guide</title>
   <style>
     :root {
       --primary: #1e40af;
       --primary-light: #eff6ff;
+      --primary-dark: #1e3a8a;
       --success: #10b981;
+      --success-light: #d1fae5;
       --warning: #f59e0b;
+      --warning-light: #fef3c7;
       --danger: #ef4444;
+      --danger-light: #fee2e2;
       --review: #6366f1;
+      --review-light: #e0e7ff;
       --text: #1e293b;
       --text-muted: #64748b;
       --bg: #f8fafc;
       --card: #ffffff;
       --border: #e2e8f0;
+      --code-bg: #f1f5f9;
     }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -28,7 +34,7 @@
       font-size: 16px;
     }
     .container {
-      max-width: 840px;
+      max-width: 900px;
       margin: 0 auto;
       padding: 40px 24px;
     }
@@ -37,28 +43,30 @@
       padding: 48px 0 32px;
     }
     .logo {
-      font-size: 42px;
-      margin-bottom: 12px;
+      font-size: 48px;
+      margin-bottom: 16px;
     }
     h1 {
-      font-size: 32px;
+      font-size: 36px;
       font-weight: 800;
       color: var(--text);
-      margin-bottom: 8px;
+      margin-bottom: 12px;
+      letter-spacing: -0.5px;
     }
     .subtitle {
-      font-size: 18px;
+      font-size: 19px;
       color: var(--text-muted);
-      max-width: 560px;
+      max-width: 600px;
       margin: 0 auto;
+      line-height: 1.5;
     }
     .badge {
       display: inline-block;
-      padding: 4px 14px;
+      padding: 5px 16px;
       border-radius: 20px;
       font-size: 13px;
       font-weight: 600;
-      margin-top: 16px;
+      margin-top: 20px;
     }
     .badge-beta {
       background: var(--primary-light);
@@ -67,38 +75,45 @@
     section {
       background: var(--card);
       border-radius: 16px;
-      padding: 32px;
-      margin-bottom: 24px;
+      padding: 36px;
+      margin-bottom: 28px;
       box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     }
     h2 {
-      font-size: 22px;
+      font-size: 24px;
       font-weight: 700;
-      margin-bottom: 16px;
+      margin-bottom: 18px;
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 12px;
     }
     h3 {
-      font-size: 17px;
+      font-size: 19px;
       font-weight: 600;
-      margin: 24px 0 12px;
+      margin: 28px 0 14px;
+      color: var(--text);
+    }
+    h4 {
+      font-size: 16px;
+      font-weight: 600;
+      margin: 20px 0 10px;
       color: var(--text);
     }
     p {
-      margin-bottom: 14px;
+      margin-bottom: 16px;
       color: var(--text-muted);
     }
     .lead {
-      font-size: 17px;
+      font-size: 18px;
       color: var(--text);
       font-weight: 500;
+      line-height: 1.6;
     }
     .steps {
       display: flex;
       flex-direction: column;
-      gap: 16px;
-      margin: 24px 0;
+      gap: 18px;
+      margin: 28px 0;
     }
     .step {
       display: flex;
@@ -106,9 +121,9 @@
       align-items: flex-start;
     }
     .step-num {
-      width: 36px;
-      height: 36px;
-      min-width: 36px;
+      width: 40px;
+      height: 40px;
+      min-width: 40px;
       border-radius: 50%;
       background: var(--primary);
       color: white;
@@ -119,123 +134,173 @@
       font-size: 15px;
     }
     .step-body h4 {
-      font-size: 15px;
+      font-size: 16px;
       font-weight: 600;
-      margin-bottom: 4px;
+      margin-bottom: 6px;
+      color: var(--text);
     }
     .step-body p {
-      font-size: 14px;
+      font-size: 15px;
       margin: 0;
+      color: var(--text-muted);
     }
     .diagram {
       background: var(--bg);
       border-radius: 12px;
-      padding: 24px;
-      margin: 20px 0;
+      padding: 28px;
+      margin: 24px 0;
       text-align: center;
       font-family: 'SF Mono', monospace;
-      font-size: 13px;
-      line-height: 2;
+      font-size: 14px;
+      line-height: 2.2;
       color: var(--text);
       overflow-x: auto;
+      border: 1px solid var(--border);
     }
-    .diagram .arrow { color: var(--primary); font-weight: 700; }
-    .diagram .box { background: white; padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border); }
+    .diagram .arrow { color: var(--primary); font-weight: 700; font-size: 16px; }
+    .diagram .box { background: white; padding: 4px 12px; border-radius: 6px; border: 1px solid var(--border); display: inline-block; margin: 2px; }
+    .diagram .label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
     .grid-2 {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 16px;
-      margin: 16px 0;
+      margin: 20px 0;
     }
-    @media (max-width: 600px) {
-      .grid-2 { grid-template-columns: 1fr; }
+    .grid-3 {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 16px;
+      margin: 20px 0;
+    }
+    @media (max-width: 700px) {
+      .grid-2, .grid-3 { grid-template-columns: 1fr; }
     }
     .card-sm {
       background: var(--bg);
-      border-radius: 10px;
-      padding: 16px;
+      border-radius: 12px;
+      padding: 20px;
+      border: 1px solid var(--border);
     }
     .card-sm h4 {
-      font-size: 14px;
+      font-size: 15px;
       font-weight: 600;
-      margin-bottom: 6px;
+      margin-bottom: 8px;
+      color: var(--text);
     }
     .card-sm p {
-      font-size: 13px;
+      font-size: 14px;
       margin: 0;
+      color: var(--text-muted);
     }
     table {
       width: 100%;
       border-collapse: collapse;
-      margin: 16px 0;
+      margin: 20px 0;
       font-size: 14px;
     }
     th, td {
       text-align: left;
-      padding: 10px 12px;
+      padding: 12px 14px;
       border-bottom: 1px solid var(--border);
     }
     th {
       font-weight: 600;
       color: var(--text-muted);
-      font-size: 12px;
+      font-size: 11px;
       text-transform: uppercase;
-      letter-spacing: 0.5px;
+      letter-spacing: 0.6px;
+      background: var(--bg);
     }
+    tr:hover td { background: var(--bg); }
     .tag {
       display: inline-block;
-      padding: 2px 10px;
+      padding: 3px 10px;
       border-radius: 4px;
       font-size: 12px;
       font-weight: 600;
     }
-    .tag-matched { background: #dcfce7; color: #166534; }
-    .tag-partial { background: #fef3c7; color: #92400e; }
-    .tag-review { background: #e0e7ff; color: #3730a3; }
-    .tag-unmatched { background: #fee2e2; color: #991b1b; }
+    .tag-matched { background: var(--success-light); color: #166534; }
+    .tag-partial { background: var(--warning-light); color: #92400e; }
+    .tag-review { background: var(--review-light); color: #3730a3; }
+    .tag-unmatched { background: var(--danger-light); color: #991b1b; }
+    .tag-exact { background: #dbeafe; color: #1e40af; }
     .tip {
-      background: #eff6ff;
+      background: var(--primary-light);
       border-left: 4px solid var(--primary);
-      padding: 16px 20px;
-      border-radius: 0 8px 8px 0;
-      margin: 16px 0;
+      padding: 18px 22px;
+      border-radius: 0 10px 10px 0;
+      margin: 20px 0;
     }
-    .tip strong { color: var(--primary); }
+    .tip strong { color: var(--primary-dark); }
     .warning {
-      background: #fffbeb;
+      background: var(--warning-light);
       border-left: 4px solid var(--warning);
-      padding: 16px 20px;
-      border-radius: 0 8px 8px 0;
-      margin: 16px 0;
+      padding: 18px 22px;
+      border-radius: 0 10px 10px 0;
+      margin: 20px 0;
     }
+    .warning strong { color: #92400e; }
+    .danger {
+      background: var(--danger-light);
+      border-left: 4px solid var(--danger);
+      padding: 18px 22px;
+      border-radius: 0 10px 10px 0;
+      margin: 20px 0;
+    }
+    .danger strong { color: #991b1b; }
     .privacy {
       background: #f0fdf4;
       border: 1px solid #bbf7d0;
       border-radius: 12px;
-      padding: 24px;
+      padding: 28px;
       margin: 24px 0;
     }
     .privacy h3 { margin-top: 0; color: #166534; }
-    .privacy p { color: #166534; margin-bottom: 8px; }
+    .privacy p { color: #166534; margin-bottom: 10px; }
     .privacy p:last-child { margin-bottom: 0; }
     footer {
       text-align: center;
-      padding: 40px 0;
+      padding: 48px 0 24px;
       color: var(--text-muted);
       font-size: 14px;
     }
-    a { color: var(--primary); text-decoration: none; }
+    a { color: var(--primary); text-decoration: none; font-weight: 500; }
     a:hover { text-decoration: underline; }
+    ul, ol {
+      margin: 14px 0 14px 24px;
+      color: var(--text-muted);
+    }
+    li { margin-bottom: 10px; }
+    code {
+      background: var(--code-bg);
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-family: 'SF Mono', monospace;
+      font-size: 13px;
+      color: var(--text);
+    }
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      font-family: 'SF Mono', monospace;
+      font-size: 13px;
+      overflow-x: auto;
+      color: var(--text);
+      margin: 14px 0;
+    }
     .example {
       background: var(--bg);
-      border-radius: 10px;
-      padding: 20px;
-      margin: 16px 0;
+      border-radius: 12px;
+      padding: 24px;
+      margin: 20px 0;
+      border: 1px solid var(--border);
     }
     .example h4 {
-      font-size: 14px;
+      font-size: 15px;
       font-weight: 600;
-      margin-bottom: 10px;
+      margin-bottom: 14px;
       color: var(--text);
     }
     .example-row {
@@ -243,27 +308,27 @@
       justify-content: space-between;
       gap: 20px;
       flex-wrap: wrap;
+      align-items: stretch;
     }
     .example-col {
       flex: 1;
       min-width: 220px;
     }
     .example-col h5 {
-      font-size: 12px;
+      font-size: 11px;
       color: var(--text-muted);
       text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 8px;
+      letter-spacing: 0.6px;
+      margin-bottom: 10px;
+      font-weight: 600;
     }
     .example-col pre {
       background: white;
       border: 1px solid var(--border);
       border-radius: 6px;
-      padding: 10px 12px;
+      padding: 12px 14px;
       font-size: 12px;
-      font-family: 'SF Mono', monospace;
-      overflow-x: auto;
-      color: var(--text);
+      margin: 0;
     }
     .vs {
       display: flex;
@@ -271,29 +336,63 @@
       justify-content: center;
       font-weight: 700;
       color: var(--primary);
-      font-size: 14px;
+      font-size: 15px;
       min-width: 40px;
     }
-    ul, ol {
-      margin: 12px 0 12px 20px;
-      color: var(--text-muted);
-    }
-    li { margin-bottom: 8px; }
     .back-btn {
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      padding: 10px 20px;
+      padding: 12px 24px;
       background: var(--primary);
       color: white;
-      border-radius: 8px;
+      border-radius: 10px;
       font-weight: 600;
       font-size: 14px;
-      margin-bottom: 24px;
+      margin-bottom: 28px;
       border: none;
       cursor: pointer;
+      transition: background 0.2s;
+    }
+    .back-btn:hover { background: var(--primary-dark); text-decoration: none; }
+    .toc {
+      background: var(--bg);
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 28px;
+      border: 1px solid var(--border);
+    }
+    .toc h3 { margin-top: 0; font-size: 16px; }
+    .toc ul { margin: 0; padding-left: 0; list-style: none; }
+    .toc li { margin-bottom: 8px; font-size: 14px; }
+    .toc a { color: var(--text-muted); font-weight: 400; }
+    .toc a:hover { color: var(--primary); }
+    .highlight-box {
+      background: linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%);
+      border: 1px solid #bfdbfe;
+      border-radius: 12px;
+      padding: 24px;
+      margin: 20px 0;
+    }
+    .score-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 8px 0;
+    }
+    .score-fill {
+      height: 8px;
+      border-radius: 4px;
+      background: var(--success);
+      min-width: 40px;
+    }
+    .score-label {
+      font-size: 13px;
+      color: var(--text-muted);
+      min-width: 80px;
     }
   </style>
+  <base target="_blank">
 <base target="_blank">
 </head>
 <body>
@@ -301,284 +400,743 @@
     <header>
       <div class="logo">🔄</div>
       <h1>Precifio Reconcile</h1>
-      <p class="subtitle">Match any two sets of documents automatically. No templates. No rigid fields. Just results.</p>
+      <p class="subtitle">Match any two datasets automatically. Invoices, bank lines, purchase orders, receipts, payroll — anything. No templates. No rigid schemas. Just intelligence.</p>
       <span class="badge badge-beta">Beta Feature</span>
     </header>
 
     <button class="back-btn" onclick="window.close()">← Back to Precifio</button>
 
-    <section>
+    <div class="toc">
+      <h3>📑 Table of Contents</h3>
+      <ul>
+        <li><a href="#what-is">What Is Reconciliation?</a></li>
+        <li><a href="#use-cases">What Can You Reconcile?</a></li>
+        <li><a href="#how-it-works">How the Matching Engine Works</a></li>
+        <li><a href="#match-types">Understanding Match Types</a></li>
+        <li><a href="#sum-matching">Sum Matching: Partial Payments, Credits & Deposits</a></li>
+        <li><a href="#workflow">Step-by-Step Workflow</a></li>
+        <li><a href="#match-rules">Deep Dive: Match Rules</a></li>
+        <li><a href="#field-aliases">Field Aliases: Cross-Format Matching</a></li>
+        <li><a href="#investigative">Investigative Reports & Anomaly Detection</a></li>
+        <li><a href="#tips">Pro Tips for Perfect Results</a></li>
+        <li><a href="#troubleshooting">Troubleshooting</a></li>
+        <li><a href="#privacy">Privacy & Data Security</a></li>
+      </ul>
+    </div>
+
+    <section id="what-is">
       <h2>📖 What Is Reconciliation?</h2>
       <p class="lead">
-        Reconciliation compares two sets of documents — Side A and Side B — and automatically finds matches between them.
+        Reconciliation is the process of comparing two sets of records to find which ones belong together. Precifio Reconcile does this automatically using a multi-signal scoring engine.
       </p>
       <p>
-        Think of it like pairing socks from two laundry baskets. You don't need to know the brand of each sock beforehand. You just look at color, size, and pattern. Precifio Reconcile does the same thing with your documents — it looks at the data inside them and figures out which ones belong together.
+        Think of it as pairing socks from two laundry baskets. You don't need a brand list. You look at color, size, and pattern. Precifio does the same with your documents — it reads the data inside them and figures out which invoice matches which payment, which PO matches which delivery note, or which payroll record matches which bank debit.
       </p>
 
       <div class="diagram">
+        <div class="label">Side A — Your Primary Documents</div>
         <span class="box">Invoice #001</span>  <span class="box">Invoice #002</span>  <span class="box">Invoice #003</span>
         <br><span class="arrow">↓</span> <span class="arrow">↓</span> <span class="arrow">↓</span>
-        <br><strong style="color:var(--primary)">PRECIFIO RECONCILE</strong>
+        <br><strong style="color:var(--primary); font-size:15px;">PRECIFIO RECONCILE ENGINE</strong>
         <br><span class="arrow">↓</span> <span class="arrow">↓</span> <span class="arrow">↓</span>
-        <br><span class="box">PO #A12</span>  <span class="box">Bank Txn #45</span>  <span class="box">Receipt #09</span>
+        <div class="label">Side B — Your Comparison Data</div>
+        <span class="box">Bank Txn #45</span>  <span class="box">PO #A12</span>  <span class="box">Receipt #09</span>
       </div>
 
       <p>
-        Side A could be invoices. Side B could be purchase orders. Or bank statements. Or delivery notes. Or lab results. <strong>Any document type works.</strong>
+        <strong>Side A</strong> could be invoices. <strong>Side B</strong> could be bank statements, purchase orders, delivery notes, or anything else. The engine doesn't care what you call the documents. It cares about the <em>signals</em> inside them: amounts, dates, reference numbers, vendor names, and more.
       </p>
+
+      <div class="tip">
+        <strong>💡 Key Insight:</strong> Precifio is <strong>document-agnostic</strong>. You can reconcile invoices against bank lines, purchase orders against vendor invoices, payroll against bank debits, or even medical records against lab results. If both sides have structured data, Precifio can match them.
+      </div>
     </section>
 
-    <section>
-      <h2>🎯 What Can You Reconcile?</h2>
+    <section id="use-cases">
+      <h2>🎯 Real-World Use Cases</h2>
       <div class="grid-2">
         <div class="card-sm">
           <h4>💰 Invoice ↔ Bank Statement</h4>
-          <p>Did we actually get paid? Match invoice totals against bank transactions.</p>
+          <p>Did we actually get paid? Match invoice totals against bank transactions by amount, date, and reference.</p>
         </div>
         <div class="card-sm">
-          <h4>📋 Purchase Order ↔ Delivery Note</h4>
-          <p>Did we receive everything we ordered? Match PO line items against delivery receipts.</p>
+          <h4>📋 Purchase Order ↔ Vendor Invoice</h4>
+          <p>Verify that what you ordered is what you were billed for. Match by PO number, vendor, and amount.</p>
         </div>
         <div class="card-sm">
           <h4>🏥 Medical Report ↔ Lab Result</h4>
-          <p>Match patient IDs, dates, and test codes across different systems.</p>
+          <p>Match patient IDs, test codes, and dates across different healthcare systems.</p>
         </div>
         <div class="card-sm">
-          <h4>📄 Quote ↔ Invoice</h4>
-          <p>Verify that the final bill matches what was originally quoted.</p>
+          <h4>🧾 Quote ↔ Final Invoice</h4>
+          <p>Ensure the final bill matches what was originally quoted. Catch scope creep or pricing errors.</p>
         </div>
         <div class="card-sm">
-          <h4>🧾 Receipt ↔ Expense Report</h4>
-          <p>Reimbursement matching for employee expenses.</p>
+          <h4>📄 Receipt ↔ Expense Report</h4>
+          <p>Employee reimbursement matching. Link individual receipts to consolidated expense claims.</p>
         </div>
         <div class="card-sm">
-          <h4>📦 Any Document ↔ Any Document</h4>
-          <p>If both sides have structured data, Precifio can match them.</p>
+          <h4>💳 Payroll ↔ Bank Debit</h4>
+          <p>Match monthly payroll totals against the corresponding bank debits. Catch discrepancies instantly.</p>
+        </div>
+        <div class="card-sm">
+          <h4>📦 Delivery Note ↔ Sales Order</h4>
+          <p>Confirm shipments match orders. Identify missing items or unauthorized substitutions.</p>
+        </div>
+        <div class="card-sm">
+          <h4>🔄 Any Document ↔ Any Document</h4>
+          <p>If both sides have structured data (CSV, Excel, JSON, or extracted fields), Precifio can reconcile them.</p>
         </div>
       </div>
     </section>
 
-    <section>
-      <h2>🚀 How to Use It — Step by Step</h2>
+    <section id="how-it-works">
+      <h2>🧠 How the Matching Engine Works</h2>
+      <p class="lead">
+        Precifio doesn't do simple lookup tables. It uses a <strong>multi-signal weighted scoring engine</strong> that evaluates every possible pair and assigns a confidence score from 0 to 100.
+      </p>
+
+      <h3>The Four Signals</h3>
+      <table>
+        <thead>
+          <tr><th>Signal</th><th>Weight</th><th>What It Checks</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Amount</strong></td>
+            <td>35%</td>
+            <td>Do the numbers match exactly or within tolerance? Supports currency checks.</td>
+          </tr>
+          <tr>
+            <td><strong>Reference</strong></td>
+            <td>25%</td>
+            <td>Do invoice numbers, PO numbers, check numbers, or transaction IDs align? Normalizes punctuation.</td>
+          </tr>
+          <tr>
+            <td><strong>Date</strong></td>
+            <td>25%</td>
+            <td>Are the dates within proximity? Validates sequence (e.g., invoice before payment).</td>
+          </tr>
+          <tr>
+            <td><strong>Vendor / Party</strong></td>
+            <td>15%</td>
+            <td>Fuzzy text match on vendor names, payees, or customer names.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>How Scoring Works</h3>
+      <p>Each signal gets a sub-score (0.0 to 1.0) multiplied by its weight. The sum is the <strong>Total Score</strong>. Separately, the engine calculates a <strong>Gate Score</strong> — the score across only the "hard gate" fields (amount, reference, currency). A match must pass its gates to be trusted, even if soft fields like description score poorly.</p>
+
+      <div class="example">
+        <h4>Example: Why a Perfect Match Might Score 71%</h4>
+        <div class="score-bar">
+          <span class="score-label">Amount</span>
+          <div class="score-fill" style="width: 100px; background: var(--success);"></div>
+          <span>100% × 0.35 = 35pts</span>
+        </div>
+        <div class="score-bar">
+          <span class="score-label">Reference</span>
+          <div class="score-fill" style="width: 100px; background: var(--success);"></div>
+          <span>100% × 0.25 = 25pts</span>
+        </div>
+        <div class="score-bar">
+          <span class="score-label">Date</span>
+          <div class="score-fill" style="width: 80px; background: var(--warning);"></div>
+          <span>80% × 0.25 = 20pts</span>
+        </div>
+        <div class="score-bar">
+          <span class="score-label">Vendor</span>
+          <div class="score-fill" style="width: 100px; background: var(--success);"></div>
+          <span>100% × 0.15 = 15pts</span>
+        </div>
+        <div class="score-bar" style="margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px;">
+          <span class="score-label" style="font-weight: 600; color: var(--text);">Total</span>
+          <div class="score-fill" style="width: 95px; background: var(--primary);"></div>
+          <span style="font-weight: 600;">95% — Matched</span>
+        </div>
+        <p style="margin-top: 12px; font-size: 13px;">If the description field were also compared and scored 20%, the total might drop to ~71% — but the match is still <strong>Exact</strong> because the hard gates are perfect.</p>
+      </div>
+
+      <h3>Matching Phases (In Order)</h3>
+      <ol>
+        <li><strong>Exact Reference Lock:</strong> Pairs where reference numbers match exactly and amounts are within tolerance are locked in immediately. No other match can "steal" these documents.</li>
+        <li><strong>Sum Matching (Partial Payments):</strong> The engine looks for multiple Side B items (payments, credits, adjustments) that sum to one Side A item (invoice).</li>
+        <li><strong>Sum Matching (Splits / Deposits):</strong> The engine looks for multiple Side A items (invoices) that sum to one Side B item (a batch deposit or consolidated payment).</li>
+        <li><strong>1:1 Fuzzy Matching:</strong> Remaining documents are scored pairwise. High-confidence pairs (90%+) auto-match. Medium-confidence (60–89%) go to Review.</li>
+        <li><strong>Unmatched Analysis:</strong> Documents with no suitable match get a detailed report explaining why, including the top 3 closest candidates and why they failed.</li>
+      </ol>
+
+      <div class="tip">
+        <strong>💡 Why This Order Matters:</strong> By locking exact references first and running sum matching second, the engine prevents a greedy 1:1 match from "stealing" a document that should be part of a split or partial payment.
+      </div>
+    </section>
+
+    <section id="match-types">
+      <h2>📊 Understanding Match Types</h2>
+      <p>After running reconciliation, results are grouped into tabs based on their classification. Here's what each one means:</p>
+
+      <table>
+        <thead>
+          <tr><th>Type</th><th>Score</th><th>What It Means</th><th>Action Needed</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="tag tag-exact">Exact</span></td>
+            <td>90–100%</td>
+            <td>All hard gates (amount, reference, currency) align perfectly. High confidence.</td>
+            <td>None. Auto-approved.</td>
+          </tr>
+          <tr>
+            <td><span class="tag tag-matched">Matched</span></td>
+            <td>75–89%</td>
+            <td>Most fields align well. Likely correct but worth a quick glance.</td>
+            <td>Quick review recommended.</td>
+          </tr>
+          <tr>
+            <td><span class="tag tag-partial">Partial Sum</span></td>
+            <td>80–89%</td>
+            <td>Multiple Side B items (e.g., payments + credit notes) add up to one Side A item (e.g., an invoice).</td>
+            <td>Verify each leg of the sum. Check that credits are correctly applied.</td>
+          </tr>
+          <tr>
+            <td><span class="tag tag-partial">Split</span></td>
+            <td>75–84%</td>
+            <td>Multiple Side A items (e.g., invoices) add up to one Side B item (e.g., a batch deposit).</td>
+            <td>Verify allocation per invoice. Check for unallocated balances.</td>
+          </tr>
+          <tr>
+            <td><span class="tag tag-review">Review</span></td>
+            <td>60–74%</td>
+            <td>Some fields match but others are off — typically amount variance or date anomaly while reference checks out.</td>
+            <td>Human review required. Open the Investigative Report to see why.</td>
+          </tr>
+          <tr>
+            <td><span class="tag tag-unmatched">Unmatched</span></td>
+            <td>—</td>
+            <td>No suitable match found. Either missing from the other side, or key fields don't align.</td>
+            <td>Check the Analysis tab for candidate explanations. May need to upload missing documents.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>Hard Gates vs. Soft Signals</h3>
+      <p>Not all fields are treated equally. <strong>Hard gates</strong> must pass for a match to be trusted. <strong>Soft signals</strong> influence the score but don't block a match on their own.</p>
+
+      <div class="grid-2">
+        <div class="card-sm">
+          <h4>🔒 Hard Gates</h4>
+          <p>Amount, Reference, Currency</p>
+          <p style="margin-top:8px; font-size:13px;">If these fail, the match is either rejected entirely or sent to Review. A wrong reference almost always means the wrong transaction.</p>
+        </div>
+        <div class="card-sm">
+          <h4>📡 Soft Signals</h4>
+          <p>Date, Vendor, Description</p>
+          <p style="margin-top:8px; font-size:13px;">These influence the total score and trigger warnings (e.g., "date anomaly"), but a perfect amount + reference can still auto-match even if the description differs.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="sum-matching">
+      <h2>🧮 Sum Matching: The Advanced Engine</h2>
+      <p class="lead">
+        Real-world accounting isn't always 1:1. One invoice might be paid in three installments. One deposit might cover five invoices. A credit note might reduce what the customer owes. Precifio handles all of these.
+      </p>
+
+      <h3>1. Partial Payments (1 Invoice → Multiple Payments)</h3>
+      <div class="example">
+        <h4>Example: Invoice Paid in Two Instalments</h4>
+        <div class="example-row">
+          <div class="example-col">
+            <h5>Side A — Invoice</h5>
+            <pre>Invoice: INV-2026-002
+Total: ₦3,250.00
+Vendor: Beta Ltd</pre>
+          </div>
+          <div class="vs">=</div>
+          <div class="example-col">
+            <h5>Side B — Payments</h5>
+            <pre>Payment 1: ₦3,000.00
+Ref: PAY-002
+
+Payment 2: ₦250.00
+Ref: PAY-003</pre>
+          </div>
+        </div>
+        <p style="margin-top:14px; font-size:14px;">
+          The engine detects that ₦3,000 + ₦250 = ₦3,250. Both payments share the vendor "Beta Ltd" and reference "INV-2026-002" appears in the payment memos. Result: <strong>Partial Sum</strong> match.
+        </p>
+      </div>
+
+      <h3>2. Credit Notes & Adjustments (Reducing the Balance)</h3>
+      <div class="example">
+        <h4>Example: Invoice with a Credit Memo</h4>
+        <div class="example-row">
+          <div class="example-col">
+            <h5>Side A — Invoice</h5>
+            <pre>Invoice: INV-2026-003
+Total: ₦12,000.00
+Vendor: Gamma Inc</pre>
+          </div>
+          <div class="vs">=</div>
+          <div class="example-col">
+            <h5>Side B — Transactions</h5>
+            <pre>Payment: ₦10,000.00
+Ref: PAY-004
+Type: payment
+
+Credit Note: -₦2,000.00
+Ref: CN-001
+Type: credit_note</pre>
+          </div>
+        </div>
+        <p style="margin-top:14px; font-size:14px;">
+          The engine calculates: ₦10,000 payment + ₦2,000 credit = ₦12,000 invoice. The credit note is treated as a <strong>negative contributor</strong>. Result: <strong>Partial Sum</strong> with credit note included in the investigative report.
+        </p>
+      </div>
+
+      <div class="example">
+        <h4>Example: Early Payment Discount (Adjustment)</h4>
+        <div class="example-row">
+          <div class="example-col">
+            <h5>Side A — Invoice</h5>
+            <pre>Invoice: INV-2026-006
+Total: ₦2,750.00
+Vendor: Epsilon LLC</pre>
+          </div>
+          <div class="vs">=</div>
+          <div class="example-col">
+            <h5>Side B — Transactions</h5>
+            <pre>Payment: ₦2,700.00
+Ref: PAY-005
+Type: payment
+
+Adjustment: -₦50.00
+Ref: ADJ-001
+Type: adjustment</pre>
+          </div>
+        </div>
+        <p style="margin-top:14px; font-size:14px;">
+          The engine sees: ₦2,700 + ₦50 adjustment = ₦2,750. The adjustment is flagged as an early payment discount in the investigative report. Result: <strong>Partial Sum</strong>.
+        </p>
+      </div>
+
+      <h3>3. Batch Deposits & Consolidated Payments (Multiple Invoices → 1 Deposit)</h3>
+      <div class="example">
+        <h4>Example: One Deposit Covers Two Invoices</h4>
+        <div class="example-row">
+          <div class="example-col">
+            <h5>Side A — Invoices</h5>
+            <pre>Invoice 1: ₦4,500.00
+Ref: INV-2026-004
+Vendor: Delta Co
+
+Invoice 2: ₦3,100.00
+Ref: INV-2026-005
+Vendor: Delta Co</pre>
+          </div>
+          <div class="vs">=</div>
+          <div class="example-col">
+            <h5>Side B — Bank</h5>
+            <pre>Deposit: ₦7,600.00
+Ref: DEP-001
+Type: deposit
+Vendor: Delta Co
+Memo: "Batch pay for
+INV-2026-004 & 005"</pre>
+          </div>
+        </div>
+        <p style="margin-top:14px; font-size:14px;">
+          The engine detects: ₦4,500 + ₦3,100 = ₦7,600. All three documents share the vendor "Delta Co". The deposit memo contains embedded invoice references. Result: <strong>Split</strong> match with a note that it's a batch deposit.
+        </p>
+      </div>
+
+      <div class="warning">
+        <strong>⚠️ Important:</strong> For sum matching to work, you <strong>must</strong> enable it in the Match Rules screen and specify which field contains the amount on each side. Without this, the engine only does 1:1 matching and will miss partial payments, credits, and splits entirely.
+      </div>
+
+      <h3>How the Engine Validates Splits</h3>
+      <p>When the engine proposes a split or partial sum, it doesn't just check the math. It validates:</p>
+      <ol>
+        <li><strong>Amount Math:</strong> Do the items sum to the target within tolerance?</li>
+        <li><strong>Vendor Consistency:</strong> Do all items in the subset belong to the same vendor (fuzzy match ≥ 80%)?</li>
+        <li><strong>Reference Links:</strong> Does at least one item contain a reference to the target document? (Relaxed for deposits, which rarely carry individual invoice numbers.)</li>
+        <li><strong>Transaction Type Awareness:</strong> Credit notes and adjustments are treated as negative contributors, not as standalone payments.</li>
+      </ol>
+
+      <div class="tip">
+        <strong>💡 Pro Tip:</strong> If your payment memos contain text like "Payment for INV-001 and INV-002", Precifio automatically extracts those embedded invoice numbers during upload and uses them to validate splits — even if there's no dedicated "reference" column.
+      </div>
+    </section>
+
+    <section id="workflow">
+      <h2>🚀 Step-by-Step Workflow</h2>
 
       <div class="steps">
         <div class="step">
           <div class="step-num">1</div>
-                <div class="step-body">
-        <h4>Prepare Your Documents (Two Ways)</h4>
-        <p><strong>Option A — From Extraction:</strong> Upload and extract your primary documents (Side A) using Precifio Extract as you normally would. PDFs, images, scans — anything works. Then click 🔄 Reconcile from the Export dropdown.</p>
-        <p><strong>Option B — Direct Upload:</strong> Click the 🔄 <strong>Reconcile Documents</strong> button on your dashboard. Create a workspace, then upload CSV, Excel, or JSON files directly to Side A and Side B. No extraction needed.</p>
-      </div>
+          <div class="step-body">
+            <h4>Prepare Your Data (Two Ways)</h4>
+            <p><strong>Option A — From Extraction:</strong> Upload and extract your primary documents (Side A) using Precifio Extract. PDFs, images, scans — anything works. Then click 🔄 <strong>Reconcile</strong> from the Export dropdown.</p>
+            <p style="margin-top:6px;"><strong>Option B — Direct Upload:</strong> Click 🔄 <strong>Reconcile Documents</strong> on your dashboard. Create a workspace, then upload CSV, Excel, or JSON files directly to Side A and Side B. No extraction needed.</p>
+          </div>
         </div>
         <div class="step">
           <div class="step-num">2</div>
           <div class="step-body">
-            <h4>Click "Reconcile"</h4>
-            <p>After extraction, click the <strong>🔄 Reconcile</strong> button in the Export dropdown. If this is your first time, you'll see a consent screen explaining that we need to store your structured data to perform matching.</p>
+            <h4>Grant Consent (First Time Only)</h4>
+            <p>Reconciliation requires storing your structured extracted data so we can compare documents. Original files are never kept — only text and numbers. You'll see a consent screen explaining this on your first run.</p>
           </div>
         </div>
         <div class="step">
           <div class="step-num">3</div>
           <div class="step-body">
             <h4>Create or Choose a Workspace</h4>
-            <p>A workspace is like a folder for one reconciliation job. You can create a new one (e.g., "August 2026 Reconciliation") or add to an existing workspace.</p>
+            <p>A workspace is a folder for one reconciliation job. Create one per month, project, or client. Example names: "August 2026 Bank Rec" or "Q3 Vendor Reconciliation".</p>
           </div>
         </div>
         <div class="step">
           <div class="step-num">4</div>
           <div class="step-body">
-            <h4>Add Comparison Data to Side B</h4>
-            <p>Upload your comparison data. This can be:</p>
-            <ul>
-                           <li>A <strong>CSV, Excel, or JSON file</strong> (e.g., bank statement export, payment report, API dump)</li>
-              <li>More <strong>extracted documents</strong> from your Precifio queue</li>
-            </ul>
-            <p>Each row in your CSV becomes a document on Side B. Column headers become field names.</p>
+            <h4>Upload Side B (Comparison Data)</h4>
+            <p>Upload your comparison dataset. This can be a CSV/Excel/JSON export from your bank, accounting software, or ERP. Each row becomes a document. Column headers become field names automatically.</p>
           </div>
         </div>
         <div class="step">
           <div class="step-num">5</div>
           <div class="step-body">
-            <h4>Review Match Rules (Optional)</h4>
-            <p>Precifio automatically detects which fields on Side A correspond to fields on Side B. Click <strong>⚙ Match Rules</strong> to review or adjust these mappings. You can add, remove, or change how fields are compared.</p>
+            <h4>Review Match Rules (Critical Step)</h4>
+            <p>Click <strong>⚙ Match Rules</strong> before running. Precifio auto-detects field mappings, but you should verify:</p>
+            <ul style="margin-top:6px;">
+              <li>Are the correct amount fields mapped?</li>
+              <li>Is the date tolerance appropriate for your workflow?</li>
+              <li>Is <strong>Sum Matching</strong> enabled if you expect partial payments or deposits?</li>
+            </ul>
           </div>
         </div>
         <div class="step">
           <div class="step-num">6</div>
           <div class="step-body">
             <h4>Run Reconciliation</h4>
-            <p>Click <strong>▶ Run Reconciliation</strong>. Precifio compares every document on Side A against every document on Side B and assigns a match score.</p>
+            <p>Click <strong>▶ Run Reconciliation</strong>. The engine compares every document on Side A against every document on Side B. For datasets under 500 documents per side, this completes in seconds. Larger datasets are queued for background processing.</p>
           </div>
         </div>
         <div class="step">
           <div class="step-num">7</div>
           <div class="step-body">
-            <h4>Review Results</h4>
-            <p>Results are grouped into four tabs: <strong>Matched</strong>, <strong>Partial</strong>, <strong>Review</strong>, and <strong>Unmatched</strong>. Click any tab to see the pairs and their scores.</p>
-                      <p>Click <strong>📥 Download</strong> in the top-right corner to save a PDF report of your entire reconciliation analysis.</p>
+            <h4>Review the Four Tabs</h4>
+            <p>Results are organized into <strong>Matched</strong>, <strong>Partial</strong>, <strong>Review</strong>, and <strong>Unmatched</strong>. Click any result to open its <strong>Investigative Report</strong> — a detailed breakdown of why it matched, why it didn't, and what actions to take.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">8</div>
+          <div class="step-body">
+            <h4>Export or Iterate</h4>
+            <p>Download a PDF or Excel report of your entire reconciliation. If results look wrong, adjust your Match Rules (tolerances, weights, sum matching) and re-run. There's no limit on re-runs.</p>
           </div>
         </div>
       </div>
     </section>
 
-    <section>
-      <h2>🧠 How Matching Works</h2>
-      <p>Precifio uses a scoring engine that compares documents across multiple signals. Each signal has a weight, and the final score is a weighted average.</p>
-
-      <h3>Match Types</h3>
-      <table>
-        <thead>
-          <tr>
-            <th>Type</th>
-            <th>Score</th>
-            <th>What It Means</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td><span class="tag tag-matched">Exact</span></td>
-            <td>90–100%</td>
-            <td>All key fields align perfectly. High confidence automatic match.</td>
-          </tr>
-          <tr>
-            <td><span class="tag tag-matched">Strong</span></td>
-            <td>75–89%</td>
-            <td>Most fields match well. Likely correct but worth a quick glance.</td>
-          </tr>
-          <tr>
-            <td><span class="tag tag-partial">Partial Sum</span></td>
-            <td>80–89%</td>
-            <td>Multiple Side B items add up to one Side A item (e.g., partial payments).</td>
-          </tr>
-          <tr>
-            <td><span class="tag tag-partial">Split</span></td>
-            <td>75–84%</td>
-            <td>Multiple Side A items add up to one Side B item (e.g., combined invoice).</td>
-          </tr>
-          <tr>
-            <td><span class="tag tag-review">Fuzzy</span></td>
-            <td>60–74%</td>
-            <td>Some fields match but others are off. Flagged for human review.</td>
-          </tr>
-          <tr>
-            <td><span class="tag tag-unmatched">Unmatched</span></td>
-            <td>—</td>
-            <td>No suitable match found on the other side.</td>
-          </tr>
-        </tbody>
-      </table>
+    <section id="match-rules">
+      <h2>⚙️ Deep Dive: Match Rules</h2>
+      <p class="lead">
+        Match rules are the DNA of your reconciliation. They tell Precifio which fields to compare, how strictly to compare them, and what to do when things don't align perfectly.
+      </p>
 
       <h3>Comparison Strategies</h3>
       <table>
         <thead>
-          <tr>
-            <th>Strategy</th>
-            <th>Best For</th>
-            <th>Example</th>
-          </tr>
+          <tr><th>Strategy</th><th>Best For</th><th>How It Works</th><th>Tolerance</th></tr>
         </thead>
         <tbody>
           <tr>
             <td><strong>Exact with Tolerance</strong></td>
-            <td>Numbers, amounts, quantities</td>
-            <td>$5,965.94 matches $5,965.94 (or within 1%)</td>
+            <td>Amounts, totals, quantities</td>
+            <td>Parses currency symbols, commas, decimals. Compares numeric values.</td>
+            <td>Absolute (e.g., ±₦0.01) + Percentage (e.g., ±1%)</td>
           </tr>
           <tr>
             <td><strong>Date Proximity</strong></td>
-            <td>Dates that may differ slightly</td>
-            <td>Invoice July 28 matches payment August 2 (within 7 days)</td>
+            <td>Invoice dates, payment dates, due dates</td>
+            <td>Parses multiple date formats. Calculates days between dates.</td>
+            <td>Days (e.g., ±7 days)</td>
           </tr>
           <tr>
             <td><strong>Normalized Exact</strong></td>
-            <td>Reference numbers, IDs</td>
-            <td>INV-20491 matches INV20491 (punctuation stripped)</td>
+            <td>Reference numbers, invoice #, PO #, check #</td>
+            <td>Strips punctuation, spaces, and case. "INV-001" = "inv001".</td>
+            <td>None (exact) or fuzzy fallback at 90% similarity</td>
+          </tr>
+          <tr>
+            <td><strong>Exact</strong></td>
+            <td>Currencies, statuses, categories</td>
+            <td>Case-insensitive string comparison. "NGN" = "ngn".</td>
+            <td>None</td>
           </tr>
           <tr>
             <td><strong>Fuzzy Text</strong></td>
-            <td>Names, descriptions, vendors</td>
-            <td>"ABC Trading Ltd" matches "ABC Trading Limited"</td>
+            <td>Vendor names, descriptions, memos</td>
+            <td>Levenshtein distance similarity. Handles typos and abbreviations.</td>
+            <td>Similarity threshold (e.g., 75%)</td>
           </tr>
         </tbody>
       </table>
-    </section>
 
-    <section>
-      <h2>⚙️ Understanding Match Rules</h2>
-      <p>Match rules tell Precifio <em>which fields to compare</em> and <em>how to compare them</em>. When you first run reconciliation, Precifio auto-detects rules by looking for field names that appear on both sides.</p>
+      <h3>Weights: How Much Each Field Matters</h3>
+      <p>Weights are decimals from 0 to 1. They determine how much each field contributes to the final score. The default weights are:</p>
+      <ul>
+        <li><strong>Amount:</strong> 0.35 (highest — the most important signal)</li>
+        <li><strong>Reference:</strong> 0.25</li>
+        <li><strong>Date:</strong> 0.25</li>
+        <li><strong>Vendor / Text:</strong> 0.15</li>
+      </ul>
+      <p>You can adjust these in the Match Rules screen. For example, if you're reconciling purchase orders against delivery notes where PO numbers are unreliable, reduce the reference weight and increase the vendor weight.</p>
 
-      <div class="example">
-        <h4>Example: Auto-Detected Rules</h4>
-        <div class="example-row">
-          <div class="example-col">
-            <h5>Side A (Invoice)</h5>
-            <pre>vendor_name
-invoice_date
-total_due
-currency</pre>
-          </div>
-          <div class="vs">↔</div>
-          <div class="example-col">
-            <h5>Side B (Purchase Order)</h5>
-            <pre>vendor_name
-po_date
-total
-currency</pre>
-          </div>
+      <h3>Gates: The Hard Stops</h3>
+      <p>A <strong>gate</strong> is a field that must pass for a match to be considered valid. If a gate fails, the match is either rejected or downgraded to Review.</p>
+      <div class="grid-2">
+        <div class="card-sm">
+          <h4>🔒 Gate = ON</h4>
+          <p>Amount, Reference, Currency</p>
+          <p style="margin-top:8px; font-size:13px;">If amount is off by 20%, the match is <strong>unmatched</strong> regardless of how good the reference is. This prevents false positives.</p>
         </div>
-        <p style="margin-top:12px; font-size:13px;">
-          Precifio detects: <code>vendor_name ↔ vendor_name</code> (fuzzy), <code>total_due ↔ total</code> (exact), <code>currency ↔ currency</code> (exact). You can override any of these.
-        </p>
+        <div class="card-sm">
+          <h4>📡 Gate = OFF</h4>
+          <p>Date, Vendor, Description</p>
+          <p style="margin-top:8px; font-size:13px;">If the date is 10 days late, the match score drops but the match can still proceed if amount + reference are perfect.</p>
+        </div>
       </div>
+
+      <h3>Tolerances: Allowing for Real-World Variance</h3>
+      <p>Not all matches are perfect. Tolerances let you define "close enough":</p>
+      <ul>
+        <li><strong>Amount Tolerance:</strong> Set an absolute value (e.g., ±₦1.00) and a percentage (e.g., ±1%). A payment of ₦4,950 against an invoice of ₦5,000 passes if your tolerance is ±₦50 or ±1%.</li>
+        <li><strong>Date Tolerance:</strong> Set in days. A payment dated August 5 against an invoice dated August 1 passes if tolerance is ≥ 4 days.</li>
+      </ul>
 
       <div class="tip">
-        <strong>💡 Pro Tip:</strong> If your CSV uses different column names (e.g., "Amount" vs "Total"), you can manually map them in the Match Rules screen. You don't need to rename your files.
+        <strong>💡 Pro Tip:</strong> For bank reconciliation, set date tolerance to <strong>3–5 days</strong> (payments clear quickly). For international wire transfers, set it to <strong>7–14 days</strong>. For accrual-based accounting, you might want date as a hard gate to catch period mismatches.
       </div>
+
+      <h3>Sum Matching Configuration</h3>
+      <p>To enable partial payments, credits, and split deposits:</p>
+      <ol>
+        <li>Open <strong>⚙ Match Rules</strong></li>
+        <li>Check <strong>"Enable Sum Matching"</strong></li>
+        <li>Enter the <strong>Side A Amount Field</strong> (e.g., <code>total</code>)</li>
+        <li>Enter the <strong>Side B Amount Field</strong> (e.g., <code>amount</code>)</li>
+        <li>Set <strong>Tolerance %</strong> (start with 0, increase only if you have rounding issues)</li>
+      </ol>
+      <p>Without sum matching enabled, the engine will never detect that two payments of ₦3,000 and ₦250 equal one invoice of ₦3,250. It will instead try to match each payment individually and likely fail.</p>
     </section>
 
-    <section>
-      <h2>📊 Sum Matching (Partial Payments & Combined Transactions)</h2>
-      <p>Sometimes one invoice is paid in multiple installments. Or multiple invoices are paid with one lump sum. Precifio handles both.</p>
+    <section id="field-aliases">
+      <h2>🔗 Field Aliases: Cross-Format Matching</h2>
+      <p class="lead">
+        Different systems use different field names. Your accounting software exports "Total Due" while your bank exports "Amount". Your PO system uses "PO Number" while your vendor uses "Order Ref". Field aliases bridge these gaps.
+      </p>
+
+      <h3>How Aliases Work</h3>
+      <p>You define a <strong>canonical name</strong> (the standard name Precifio recognizes) and a list of <strong>aliases</strong> (the variations your files might use). During reconciliation, all aliases are normalized to the canonical name before matching.</p>
 
       <div class="example">
-        <h4>Example: Partial Payment Match</h4>
+        <h4>Example: Mapping "Amount" Across Formats</h4>
         <div class="example-row">
           <div class="example-col">
-            <h5>Side A (Invoice)</h5>
-            <pre>Invoice #001
-Total: ₦1,000,000</pre>
+            <h5>Canonical Name</h5>
+            <pre>amount</pre>
           </div>
-          <div class="vs">=</div>
           <div class="example-col">
-            <h5>Side B (Payments)</h5>
-            <pre>Payment 1: ₦600,000
-Payment 2: ₦400,000</pre>
+            <h5>Aliases</h5>
+            <pre>total, total_due, amt,
+amount_paid, grand_total,
+payment, sum, value</pre>
           </div>
         </div>
-        <p style="margin-top:12px; font-size:13px;">
-          Precifio detects that ₦600,000 + ₦400,000 = ₦1,000,000 and marks this as a <strong>Partial Sum</strong> match.
-        </p>
       </div>
 
-      <p>To enable sum matching, go to <strong>⚙ Match Rules</strong> and turn on <strong>"Enable Sum Matching"</strong>. Then specify which field contains the amount on each side.</p>
+      <h3>Recommended Alias Setup</h3>
+      <p>Go to <strong>⚙ Reconciliation Settings → Field Aliases</strong> and add these common mappings:</p>
+      <table>
+        <thead>
+          <tr><th>Canonical</th><th>Aliases</th><th>Type</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>amount</code></td>
+            <td>total, amt, total_due, grand_total, payment, paid, sum, value</td>
+            <td>numeric</td>
+          </tr>
+          <tr>
+            <td><code>invoice_number</code></td>
+            <td>inv, invoice, inv_no, invoice_no, invoice_ref, ref, reference</td>
+            <td>reference</td>
+          </tr>
+          <tr>
+            <td><code>date</code></td>
+            <td>invoice_date, payment_date, txn_date, document_date, created_at</td>
+            <td>date</td>
+          </tr>
+          <tr>
+            <td><code>vendor</code></td>
+            <td>supplier, payee, customer, party, company, vendor_name, client</td>
+            <td>text</td>
+          </tr>
+          <tr>
+            <td><code>po_number</code></td>
+            <td>po, purchase_order, order_no, order_number, po_ref</td>
+            <td>reference</td>
+          </tr>
+          <tr>
+            <td><code>currency</code></td>
+            <td>curr, cc, currency_code, fx</td>
+            <td>text</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="tip">
+        <strong>💡 Pro Tip:</strong> Aliases are saved per user and apply across all workspaces. Set them up once and they'll improve auto-detection for every reconciliation you run.
+      </div>
     </section>
 
-    <section>
-      <h2>✅ Tips for Best Results</h2>
+    <section id="investigative">
+      <h2>🔍 Investigative Reports & Anomaly Detection</h2>
+      <p class="lead">
+        Every match — and every unmatched document — gets a detailed investigative report. This isn't just a score. It's a forensic breakdown of why the engine made its decision, what signals passed, what failed, and what you should do next.
+      </p>
+
+      <h3>What's Inside an Investigative Report</h3>
+      <div class="grid-2">
+        <div class="card-sm">
+          <h4>📊 Scoring Breakdown</h4>
+          <p>Total score, gate score, and whether all hard gates were present. Shows exactly how each field contributed to the final number.</p>
+        </div>
+        <div class="card-sm">
+          <h4>🚩 Gate Failures</h4>
+          <p>A list of which hard gates failed and why: <code>amount_mismatch</code>, <code>reference_mismatch</code>, <code>currency_mismatch</code>, etc.</p>
+        </div>
+        <div class="card-sm">
+          <h4>⚠️ Warnings</h4>
+          <p>Soft-signal issues that don't block the match but deserve attention: <code>date_sequence_violation</code>, <code>date_variance</code>, etc.</p>
+        </div>
+        <div class="card-sm">
+          <h4>📝 Investigative Notes</h4>
+          <p>Human-readable narratives explaining the anomaly, severity levels (low / medium / high / critical), and suggested actions.</p>
+        </div>
+      </div>
+
+      <h3>Example: Amount Variance Report</h3>
+      <div class="example">
+        <h4>Invoice vs Payment with a Difference</h4>
+        <div class="example-row">
+          <div class="example-col">
+            <h5>Side A — Invoice</h5>
+            <pre>Total: ₦5,000.00</pre>
+          </div>
+          <div class="vs">vs</div>
+          <div class="example-col">
+            <h5>Side B — Payment</h5>
+            <pre>Amount: ₦4,950.00</pre>
+          </div>
+        </div>
+        <p style="margin-top:14px; font-size:14px;">
+          <strong>Investigative Note:</strong> "The payment is ₦50.00 below the invoice amount (1% of base). This could indicate a partial payment, early payment discount, credit note, or deduction."<br><br>
+          <strong>Suggested Actions:</strong>
+        </p>
+        <ul style="font-size:14px;">
+          <li>Check payment terms for early payment discounts</li>
+          <li>Review credit notes or adjustments</li>
+          <li>Verify if retention or withholding applies</li>
+          <li>Confirm partial payment agreement</li>
+        </ul>
+      </div>
+
+      <h3>Example: Unmatched Document Analysis</h3>
+      <p>When a document has no match, the report doesn't just say "unmatched." It shows:</p>
+      <ul>
+        <li>The document's own amount, reference, and date</li>
+        <li>The <strong>top 3 closest candidates</strong> from the other side</li>
+        <li>Why each candidate failed (gate failures, score too low, already matched to another document)</li>
+        <li>Specific actions: "Verify if payment is pending," "Check for duplicate invoice," "Review if amount was adjusted"</li>
+      </ul>
+
+      <h3>AI-Enhanced Narratives</h3>
+      <p>If you have OpenAI integration enabled, the engine generates a concise 2–3 sentence executive summary of each anomaly. This appears in the <strong>Analysis</strong> tab and gives you the "so what" without reading every field-level detail.</p>
+    </section>
+
+    <section id="tips">
+      <h2>✅ Pro Tips for Perfect Results</h2>
       <ol>
-        <li><strong>Use consistent date formats.</strong> ISO format (YYYY-MM-DD) works best, but most common formats are supported.</li>
-        <li><strong>Include reference numbers.</strong> Invoice numbers, PO numbers, and transaction IDs dramatically improve match accuracy.</li>
-        <li><strong>Clean your CSV before upload.</strong> Remove empty rows, header repeats, and summary totals that aren't actual line items.</li>
-        <li><strong>Name your fields clearly.</strong> "amount", "total", "payment" are all recognized as numeric. "ref", "reference", "invoice_number" are recognized as identifiers.</li>
-        <li><strong>Start with a small batch.</strong> Test with 10–20 documents first to verify your match rules before running on hundreds.</li>
-        <li><strong>Review the "Review" tab carefully.</strong> These are the matches Precifio is unsure about. A quick human check prevents errors.</li>
-        <li><strong>Use workspaces for time periods.</strong> Create one workspace per month or per project. Don't dump everything into one giant workspace.</li>
+        <li><strong>Use consistent date formats.</strong> ISO format (YYYY-MM-DD) works best, but most common formats are auto-parsed.</li>
+        <li><strong>Include reference numbers.</strong> Invoice numbers, PO numbers, check numbers, and transaction IDs are the strongest matching signals. Without them, the engine relies heavily on amount + date, which is less reliable.</li>
+        <li><strong>Include a "type" column in your CSV.</strong> Values like <code>payment</code>, <code>credit_note</code>, <code>adjustment</code>, or <code>deposit</code> help the engine apply the correct math and generate better investigative reports.</li>
+        <li><strong>Clean your CSV before upload.</strong> Remove empty rows, header repeats, and summary totals that aren't actual line items. Summary rows create false matches.</li>
+        <li><strong>Name your fields clearly.</strong> "amount", "total", "payment" are auto-recognized as numeric. "ref", "reference", "invoice_number" are recognized as identifiers.</li>
+        <li><strong>Start with a small batch.</strong> Test with 10–20 documents to verify your match rules before running on hundreds.</li>
+        <li><strong>Enable Sum Matching for real-world accounting.</strong> If you only do 1:1 matching, you'll miss partial payments, credit notes, and batch deposits.</li>
+        <li><strong>Set date tolerance based on your payment method.</strong> Local bank transfers: 3 days. International wires: 7–14 days. Cash: same day.</li>
+        <li><strong>Review the "Review" tab carefully.</strong> These are the matches the engine is unsure about. A 2-minute human check prevents errors.</li>
+        <li><strong>Use workspaces for time periods.</strong> Create one workspace per month or per project. Don't dump everything into one giant workspace — it slows down matching and creates cross-period false positives.</li>
+        <li><strong>Set up Field Aliases early.</strong> Do it once in Settings and every future reconciliation benefits from better auto-detection.</li>
+        <li><strong>Re-run after adjusting rules.</strong> There's no limit on re-runs. If the first result looks wrong, tweak tolerances or weights and try again.</li>
       </ol>
-       <li><strong>You can remove individual documents.</strong> Hover over any document in Side A or Side B and click the ✕ to remove it if you uploaded the wrong file.</li>
     </section>
 
-    <section>
-      <h2>🔒 Your Data & Privacy</h2>
+    <section id="troubleshooting">
+      <h2>❓ Troubleshooting</h2>
+
+      <h3>"No matches found"</h3>
+      <ul>
+        <li>Confirm both Side A and Side B have data. Check the Side A / Side B tabs.</li>
+        <li>Review your Match Rules. Are the correct amount fields mapped? Is Sum Matching enabled if needed?</li>
+        <li>Check if your amount fields are actually numeric. Text like "$1,000" is handled, but "One thousand" is not.</li>
+        <li>Verify your date formats are parseable. Try YYYY-MM-DD if unsure.</li>
+      </ul>
+
+      <h3>"Too many unmatched items"</h3>
+      <ul>
+        <li>Increase the date tolerance in Match Rules (e.g., from 3 days to 7 or 14 days).</li>
+        <li>Increase the amount tolerance percentage slightly (e.g., from 0% to 1%).</li>
+        <li>Enable or increase fuzzy matching weights for vendor names.</li>
+        <li>Check if your CSV has summary rows or totals that shouldn't be treated as individual documents. Remove them.</li>
+        <li>Verify your Field Aliases are set up. If the engine can't find "amount" because your column is called "amt_paid", it won't match.</li>
+      </ul>
+
+      <h3>"Wrong documents are matching"</h3>
+      <ul>
+        <li>Add more match rules with higher weights. Reference numbers are the strongest signal.</li>
+        <li>Reduce the amount tolerance if amounts are matching incorrectly across different vendors.</li>
+        <li>Make the vendor field a hard gate if cross-vendor matches are happening.</li>
+        <li>Check the "Review" tab — these are the ambiguous matches that need your attention.</li>
+      </ul>
+
+      <h3>"Split matches have no reference proof"</h3>
+      <ul>
+        <li>Ensure your payment memos or description fields contain invoice numbers. The engine extracts embedded references automatically.</li>
+        <li>If references are in a separate column, make sure it's mapped as a reference-type rule.</li>
+        <li>For batch deposits with no individual references, the engine will still match by vendor + amount math, but will flag it as "batch deposit" in the report.</li>
+      </ul>
+
+      <h3>"Credit notes show as unmatched"</h3>
+      <ul>
+        <li>Make sure Sum Matching is enabled in Match Rules.</li>
+        <li>Ensure your credit notes have a <code>type</code> column with value <code>credit_note</code> or similar.</li>
+        <li>Verify the credit note and the corresponding payment share the same vendor.</li>
+        <li>Check that the credit note amount is negative (e.g., -2000.00) in your CSV.</li>
+      </ul>
+
+      <h3>"I can't delete my data"</h3>
+      <ul>
+        <li>Open any workspace and click <strong>⚙ Settings</strong> in the top-right.</li>
+        <li>Scroll to <strong>Data Management</strong> and click <strong>Delete All Data</strong>.</li>
+        <li>Type <code>DELETE</code> to confirm. This is permanent and instant.</li>
+      </ul>
+    </section>
+
+    <section id="privacy">
+      <h2>🔒 Privacy & Data Security</h2>
       <div class="privacy">
         <h3>🔐 Zero Retention by Default</h3>
         <p>When you use Precifio Extract <em>without</em> Reconciliation, your documents and extracted data are purged immediately after processing. We store nothing.</p>
@@ -586,53 +1144,21 @@ Payment 2: ₦400,000</pre>
         <p><strong>What we store:</strong> Structured text and numbers only (e.g., amounts, dates, vendor names, reference numbers).</p>
         <p><strong>What we never store:</strong> Your original PDFs, images, scans, or files.</p>
         <p><strong>How we protect it:</strong> AES-256 encryption at rest and in transit.</p>
-        <p><strong>Your control:</strong> Delete all reconciliation data instantly from your Settings — no support ticket required.</p>
+        <p><strong>Your control:</strong> Delete all reconciliation data instantly from Settings — no support ticket required.</p>
         <p><strong>What we will never do:</strong> Use your data to train AI models, sell it, or share it with third parties.</p>
       </div>
     </section>
 
     <section>
-      <h2>❓ Troubleshooting</h2>
-
-      <h3>"No matches found"</h3>
-      <ul>
-        <li>Make sure both Side A and Side B have data. Check the tabs to confirm.</li>
-        <li>Review your Match Rules. Are the correct fields mapped?</li>
-        <li>Check if your amount fields are actually numeric (not text like "$1,000" — though Precifio handles most formats).</li>
-      </ul>
-
-      <h3>"Too many unmatched items"</h3>
-      <ul>
-        <li>Increase the date tolerance in Match Rules (e.g., from 7 days to 14 days).</li>
-        <li>Increase the amount tolerance percentage slightly.</li>
-        <li>Enable Fuzzy Matching if it's turned off.</li>
-        <li>Check if your CSV has summary rows or totals that shouldn't be treated as individual documents.</li>
-      </ul>
-
-      <h3>"Wrong documents are matching"</h3>
-      <ul>
-        <li>Add more match rules with higher weights. Reference numbers (invoice #, PO #) are the strongest signals.</li>
-        <li>Reduce the amount tolerance if amounts are matching incorrectly.</li>
-        <li>Check the "Review" tab — these are the ambiguous matches that need your attention.</li>
-      </ul>
-
-      <h3>"I can't delete my data"</h3>
-      <ul>
-               <li>Open any workspace and click the <strong>⚙ Settings</strong> button in the top-right. From there you can manage Field Aliases, export your settings, or click <strong>Delete All Data</strong> to permanently erase everything.</li>
-                <li>This is permanent and instant. There is no recovery.</li>
-      </ul>
-    </section>
-
-        <section>
       <h2>📞 Need Help?</h2>
-      <p>If something isn't working as expected, or you have a use case we haven't covered, visit our Support Center:</p>
-      <p><a href="/support" style="font-weight:600;">Go to Support Center →</a></p>
-      <p style="font-size:13px; color:var(--text-muted);">You can also email us directly at <a href="mailto:support@precifio.app">support@precifio.app</a>. Include your workspace name and a description of what you're trying to match. Screenshots help too.</p>
+      <p>If something isn't working as expected, or you have a use case we haven't covered:</p>
+      <p style="margin-top:12px;"><a href="/support" style="font-weight:600;">Go to Support Center →</a></p>
+      <p style="font-size:14px; color:var(--text-muted); margin-top:12px;">You can also email us at <a href="mailto:support@precifio.app">support@precifio.app</a>. Include your workspace name and a description of what you're trying to match. Screenshots help too.</p>
     </section>
 
     <footer>
       <p>© 2026 Precifio Extract. Built with you in mind.</p>
-      <p style="margin-top:8px; font-size:12px;"><a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms of Service</a></p>
+      <p style="margin-top:10px; font-size:13px;"><a href="/privacy">Privacy Policy</a> · <a href="/terms">Terms of Service</a></p>
     </footer>
   </div>
 </body>

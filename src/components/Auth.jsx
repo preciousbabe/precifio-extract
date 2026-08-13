@@ -2,7 +2,7 @@ import { useState } from 'react';
 
 const API_BASE = '/.netlify/functions';
 
-export function Auth({ initialMode = 'login', resetToken }) {
+export function Auth({ initialMode = 'login', resetToken, featureMessage }) {
   // ── Mode replaces the boolean isLoginView ─────────────────────────
   const [mode, setMode] = useState(
     ['login', 'signup', 'forgot', 'reset'].includes(initialMode) ? initialMode : 'login'
@@ -167,8 +167,23 @@ export function Auth({ initialMode = 'login', resetToken }) {
     message.includes('updated');
 
   return (
-    <div style={{ maxWidth: '400px', margin: '40px auto', padding: '24px' }}>
+        <div style={{ maxWidth: '400px', margin: '40px auto', padding: '24px' }}>
       <h2 style={{ textAlign: 'center', marginBottom: '24px' }}>Precifio Extract</h2>
+
+      {featureMessage && (
+        <div style={{
+          marginBottom: '20px',
+          padding: '14px 16px',
+          background: '#eff6ff',
+          border: '1px solid #bfdbfe',
+          borderRadius: '8px',
+          color: '#1e40af',
+          fontSize: '14px',
+          lineHeight: 1.5
+        }}>
+          {featureMessage}
+        </div>
+      )}
 
       {/* ── LOGIN ── */}
       {mode === 'login' && (

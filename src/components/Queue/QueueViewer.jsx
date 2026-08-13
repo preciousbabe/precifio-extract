@@ -584,18 +584,23 @@ function ExportDropdown({ item, segments, onExport, user, disabled, config }) {
           setTimeout(() => setCopied(false), 2000);
           break;
 
-       case "reconcile":
-       if (!user) {
-         window.dispatchEvent(
-           new CustomEvent("showAuthModal", { detail: { mode: "signup" } })
-         );
-         setOpen(false);
-         return;
-       }
-       setShowConsent(true);
-       setOpen(false);
-       break;
-
+       case "reconcile": {
+  if (!user) {
+    window.dispatchEvent(
+      new CustomEvent("showAuthModal", {
+        detail: {
+          mode: "signup",
+          message: "Reconciliation is available for registered users only. Sign up to match invoices, payments, and detect anomalies automatically.",
+        },
+      })
+    );
+    setOpen(false);
+    return;
+  }
+  setShowConsent(true);
+  setOpen(false);
+  break;
+}
         default:
           console.warn("Unknown export format:", format);
           break;

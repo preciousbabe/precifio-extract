@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { useReconciliation } from "../../hooks/useReconciliation";
 import InvestigativeReportPanel from "./InvestigativeReportPanel";
 import MatchConfigModal from "./MatchConfigModal";
+import { estimateReconciliationCost } from "../../utils/credit";
 import SettingsPage from "./SettingsPage";
 
 async function parseSpreadsheet(file) {
@@ -46,6 +47,7 @@ function normalizeCSVRow(row) {
   }
   return out;
 }
+
 
 function UploadToSideModal({ side, onClose, onUploadCSV }) {
   const [files, setFiles] = useState([]);
@@ -126,6 +128,7 @@ export default function ReconcileWorkspaceModal({ workspaceId, onClose }) {
   const [activeTab, setActiveTab] = useState("side_a");
   const [showConfig, setShowConfig] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
+  const [runCost, setRunCost] = useState(null);
   const [uploadSide, setUploadSide] = useState(null);
   const [deletingDocId, setDeletingDocId] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -215,16 +218,23 @@ export default function ReconcileWorkspaceModal({ workspaceId, onClose }) {
     }
   };
 
-  const handleRun = async () => {
+    const handleRun = async () => {
     setIsRunning(true);
+    setRunCost(null);
     try {
-      await runReconciliation(workspaceId);
+      const result = await runReconciliation(workspaceId);
+      setRunCost(result?.cost || null);
       await fetchResults(workspaceId);
       setActiveTab("matched");
+    } catch (err) {
+      if (err?.code === "PAYMENT_REQUIRED" || err?.message?.includes("Insufficient credits")) {
+        alert("Insufficient credits. Please top up your balance to run reconciliation.");
+      }
     } finally {
       setIsRunning(false);
     }
   };
+
 
   const sideADocs = React.useMemo(() => (results?.documents || []).filter((d) => d.dataset_side === "A"), [results?.documents]);
   const sideBDocs = React.useMemo(() => (results?.documents || []).filter((d) => d.dataset_side === "B"), [results?.documents]);
@@ -406,21 +416,42 @@ export default function ReconcileWorkspaceModal({ workspaceId, onClose }) {
             >
               ⚙ Match Rules
             </button>
-            <button
-              onClick={handleRun}
-              disabled={isRunning || sideADocs.length === 0 || sideBDocs.length === 0}
-              style={{
-                padding: "8px 16px", borderRadius: "6px", border: "none",
-                background: "#1e40af", color: "white", fontSize: "13px", cursor: "pointer", fontWeight: 600
-              }}
-            >
-              {isRunning ? "Running…" : "▶ Run Reconciliation"}
-            </button>
+                        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+              {sideADocs.length > 0 && sideBDocs.length > 0 && !isRunning && (
+                <span style={{ fontSize: "12px", color: "#64748b" }}>
+                  ~{estimateReconciliationCost(sideADocs.length, sideBDocs.length)} credits
+                </span>
+              )}
+              <button
+                onClick={handleRun}
+                disabled={isRunning || sideADocs.length === 0 || sideBDocs.length === 0}
+                style={{
+                  padding: "8px 16px", borderRadius: "6px", border: "none",
+                  background: "#1e40af", color: "white", fontSize: "13px", cursor: "pointer", fontWeight: 600
+                }}
+              >
+                {isRunning ? "Running…" : "▶ Run Reconciliation"}
+              </button>
+            </div>
           </div>
 
           {error && (
             <div style={{ padding: "10px 24px", background: "#fef2f2", color: "#dc2626", fontSize: "13px" }}>
               {error}
+            </div>
+          )}
+
+                    {runCost && (
+            <div style={{ padding: "10px 24px", background: "#f0fdf4", color: "#166534", fontSize: "13px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>
+                ✓ Reconciliation complete.{" "}
+                {runCost.deducted
+                  ? `Charged ${runCost.actual} credits.`
+                  : `Cost: ${runCost.actual} credits (deduction failed — please contact support).`}
+              </span>
+              <span style={{ fontSize: "12px", color: "#64748b" }}>
+                Balance: {runCost.balance_after} credits
+              </span>
             </div>
           )}
 
@@ -577,56 +608,116 @@ export default function ReconcileWorkspaceModal({ workspaceId, onClose }) {
                   </>
                 )}
 
-                {/* Unmatched Analysis */}
-                {currentWorkspace?.last_rejected_candidates?.length > 0 && (
-                  <>
-                    <div style={{ fontSize: "14px", fontWeight: 600, color: "#1e293b", marginBottom: "12px" }}>
-                      Why Documents Are Unmatched
+                {/* Unmatched Document Reports */}
+{(() => {
+  const unmatchedDocs = (results?.documents || []).filter(d => d.status === "unmatched" && d.unmatched_analysis);
+  if (unmatchedDocs.length === 0) return null;
+  return (
+    <>
+      <div style={{ fontSize: "14px", fontWeight: 600, color: "#1e293b", marginBottom: "12px" }}>
+        Why Documents Are Unmatched ({unmatchedDocs.length})
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginBottom: "24px" }}>
+        {unmatchedDocs.slice(0, 20).map(doc => {
+          const report = doc.unmatched_analysis;
+          return (
+            <div key={doc.id} style={{ background: "#fef2f2", borderRadius: "10px", padding: "14px", border: "1px solid #fecaca" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                <span style={{ fontSize: "13px", fontWeight: 600, color: "#991b1b" }}>
+                  {doc.document_name} ({doc.dataset_side})
+                </span>
+                <span style={{ fontSize: "11px", color: "#991b1b", fontWeight: 600 }}>
+                  {report?.confidence || "none"}
+                </span>
+              </div>
+              <p style={{ fontSize: "13px", color: "#475569", margin: "0 0 8px", lineHeight: 1.5 }}>
+                {report?.summary_narrative}
+              </p>
+              {report?.candidate_analysis?.length > 0 && (
+                <div style={{ marginTop: "8px" }}>
+                  <div style={{ fontSize: "11px", color: "#94a3b8", fontWeight: 600, marginBottom: "4px" }}>TOP CANDIDATES</div>
+                  {report.candidate_analysis.slice(0, 3).map((cand, i) => (
+                    <div key={i} style={{ fontSize: "12px", color: "#64748b", padding: "4px 0", borderBottom: i < 2 ? "1px solid #fee2e2" : "none" }}>
+                      #{i + 1}: {cand.document_name} — Score: {cand.score}%, Status: {cand.status}, Why: {cand.why}
+                      {cand.already_matched_to_other && <span style={{ color: "#92400e", marginLeft: "6px" }}>(already matched)</span>}
                     </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                      {currentWorkspace.last_rejected_candidates
-                        .slice(0, 20)
-                        .map((rc, i) => {
-                          const doc = (results?.documents || []).find(d => d.id === rc.doc_id);
-                          const candidate = (results?.documents || []).find(d => d.id === rc.candidate_id);
-                          return (
-                            <div key={i} style={{ background: "#fef2f2", borderRadius: "10px", padding: "14px", border: "1px solid #fecaca" }}>
-                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
-                                <span style={{ fontSize: "13px", fontWeight: 600, color: "#991b1b" }}>
-                                  {doc?.document_name || "Unknown"} ({rc.doc_side})
-                                </span>
-                                <span style={{ fontSize: "11px", color: "#991b1b", fontWeight: 600 }}>
-                                  Best score: {rc.score}%
-                                </span>
-                              </div>
-                              <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "6px" }}>
-                                Closest candidate: {candidate?.document_name || "Unknown"} ({rc.candidate_side})
-                              </div>
-                              {rc.gate_failures?.length > 0 && (
-                                <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", marginBottom: "6px" }}>
-                                  {rc.gate_failures.map((gf, j) => (
-                                    <span key={j} style={{ fontSize: "11px", padding: "2px 8px", borderRadius: "4px", background: "#fee2e2", color: "#991b1b" }}>
-                                      {gf}
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
-                              <div style={{ fontSize: "12px", color: "#92400e" }}>
-                                Why unmatched: <strong>{rc.reason}</strong>
-                              </div>
-                            </div>
-                          );
-                        })}
+                  ))}
+                </div>
+              )}
+              {report?.investigative_notes?.length > 0 && (
+                <div style={{ marginTop: "8px" }}>
+                  {report.investigative_notes.map((note, i) => (
+                    <div key={i} style={{ fontSize: "12px", color: "#92400e", marginTop: "4px" }}>
+                      <strong>{note.type.replace(/_/g, " ")}:</strong> {note.narrative}
                     </div>
-                  </>
-                )}
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+})()}
 
-                {(results?.matches || []).filter(m => m.investigative_report?.openai_narrative && m.status !== "matched").length === 0 && 
-                 !currentWorkspace?.last_rejected_candidates?.length && (
-                  <div style={{ textAlign: "center", padding: "40px", color: "#94a3b8", fontSize: "13px" }}>
-                    No anomalies detected. All documents reconciled cleanly.
-                  </div>
-                )}
+{/* Legacy: Rejected Candidates (fallback for older runs) */}
+{currentWorkspace?.last_rejected_candidates?.length > 0 && (
+  <>
+    <div style={{ fontSize: "14px", fontWeight: 600, color: "#1e293b", marginBottom: "12px" }}>
+      Additional Rejected Candidates
+    </div>
+    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+      {currentWorkspace.last_rejected_candidates
+        .slice(0, 10)
+        .map((rc, i) => {
+          const doc = (results?.documents || []).find(d => d.id === rc.doc_id);
+          const candidate = (results?.documents || []).find(d => d.id === rc.candidate_id);
+          return (
+            <div key={i} style={{ background: "#fef2f2", borderRadius: "10px", padding: "14px", border: "1px solid #fecaca" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                <span style={{ fontSize: "13px", fontWeight: 600, color: "#991b1b" }}>
+                  {doc?.document_name || "Unknown"} ({rc.doc_side})
+                </span>
+                <span style={{ fontSize: "11px", color: "#991b1b", fontWeight: 600 }}>
+                  Best score: {rc.score}%
+                </span>
+              </div>
+              <div style={{ fontSize: "12px", color: "#64748b", marginBottom: "6px" }}>
+                Closest candidate: {candidate?.document_name || "Unknown"} ({rc.candidate_side})
+              </div>
+              {rc.gate_failures?.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", marginBottom: "6px" }}>
+                  {rc.gate_failures.map((gf, j) => (
+                    <span key={j} style={{ fontSize: "11px", padding: "2px 8px", borderRadius: "4px", background: "#fee2e2", color: "#991b1b" }}>
+                      {gf}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div style={{ fontSize: "12px", color: "#92400e" }}>
+                Why unmatched: <strong>{rc.reason}</strong>
+              </div>
+            </div>
+          );
+        })}
+    </div>
+  </>
+)}
+
+{(() => {
+  const hasAiInsights = (results?.matches || []).filter(m => m.investigative_report?.openai_narrative && m.status !== "matched").length > 0;
+  const hasUnmatchedReports = (results?.documents || []).some(d => d.status === "unmatched" && d.unmatched_analysis);
+  const hasRejected = currentWorkspace?.last_rejected_candidates?.length > 0;
+  if (!hasAiInsights && !hasUnmatchedReports && !hasRejected) {
+    return (
+      <div style={{ textAlign: "center", padding: "40px", color: "#94a3b8", fontSize: "13px" }}>
+        No anomalies detected. All documents reconciled cleanly.
+      </div>
+    );
+  }
+  return null;
+   })()}
               </div>
             )}
           </div>

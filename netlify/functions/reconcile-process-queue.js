@@ -1,5 +1,6 @@
 // netlify/functions/reconcile-process-queue.js
 const { createClient } = require("@supabase/supabase-js");
+const { calculateReconciliationCost, getUserCredits, deductCredits } = require("./lib/credits");
 const core = require("./lib/reconcile-core");
 
 const supabase = createClient(
@@ -147,7 +148,7 @@ exports.handler = async (event, context) => {
         fields = { ...fields.extracted_fields };
       }
       
-      // Fix 5: Extract embedded references from all text fields
+              // Fix 5: Extract embedded references from all text fields
       const allText = Object.values(fields).filter(v => typeof v === "string" && v.length > 3).join(" ");
       const extractedRefs = core.extractEmbeddedReferences(allText);
       if (extractedRefs.length > 0) {
@@ -159,18 +160,32 @@ exports.handler = async (event, context) => {
     const normalizedSideA = (sideA || []).map(normalizeDoc);
     const normalizedSideB = (sideB || []).map(normalizeDoc);
 
-    if (!normalizedSideA.length || !normalizedSideB.length) {
+       if (!normalizedSideA.length || !normalizedSideB.length) {
       await supabase.from("reconciliation_workspaces").update({ status: "completed", is_processing: false, processing_started_at: null }).eq("id", workspace_id);
       await supabase.from("reconciliation_runs").update({ status: "completed", completed_at: new Date().toISOString() }).eq("id", runRecord.id);
       return ok({ message: "Both sides need data to reconcile", summary: ws.summary, processed: true });
     }
 
+    // ─── CREDIT CHECK ─────────────────────────────────────────────────────
+    const sideACount = normalizedSideA.length;
+    const sideBCount = normalizedSideB.length;
+    const estimatedCost = calculateReconciliationCost(sideACount, sideBCount, 0);
+    const userBalance = await getUserCredits(supabase, userId);
+
+    if (userBalance < estimatedCost) {
+      await supabase.from("reconciliation_runs").update({ status: "failed", error_message: "Insufficient credits", completed_at: new Date().toISOString() }).eq("id", runRecord.id);
+      await supabase.from("reconciliation_workspaces").update({ is_processing: false, processing_started_at: null }).eq("id", workspace_id);
+      workspaceLocked = false;
+      return err(402, "PAYMENT_REQUIRED", `Insufficient credits. This run requires ~${estimatedCost} credits. Your balance: ${userBalance}.`, { required: estimatedCost, balance: userBalance });
+    }
+
+
     // Get or generate config
     let config = ws.match_configuration;
     if (!config || !config.rules || config.auto_generated) {
       const aliasMap = await resolveFieldAliases(userId);
-      const aFields = [...new Set(normalizedSideA.flatMap(d => Object.keys(d.extracted_fields || {})))];
-      const bFields = [...new Set(normalizedSideB.flatMap(d => Object.keys(d.extracted_fields || {})))];
+           const aFields = [...new Set(normalizedSideA.flatMap(d => Object.keys(d.extracted_fields || {}).filter(k => !k.startsWith("__"))))];
+      const bFields = [...new Set(normalizedSideB.flatMap(d => Object.keys(d.extracted_fields || {}).filter(k => !k.startsWith("__"))))];
       config = core.autoGenerateMatchConfig(aFields, bFields, aliasMap, normalizedSideA, normalizedSideB);
 
       const configValid = core.validateConfig(config);
@@ -265,11 +280,36 @@ exports.handler = async (event, context) => {
       total: aDocs.length,
     };
 
+        // ─── DEDUCT ACTUAL CREDITS ────────────────────────────────────────────
+    const actualCost = calculateReconciliationCost(sideACount, sideBCount, matches.length);
+    const deduction = await deductCredits(supabase, userId, actualCost, "reconciliation", runRecord.id, {
+      workspace_id,
+      side_a_count: sideACount,
+      side_b_count: sideBCount,
+      match_count: matches.length,
+    });
+
+    if (!deduction.success) {
+      console.warn("Queued run credit deduction failed:", deduction.error);
+    }
+
     await supabase.from("reconciliation_workspaces").update({ status: "completed", summary, is_processing: false, processing_started_at: null }).eq("id", workspace_id);
     await supabase.from("reconciliation_runs").update({ status: "completed", completed_at: new Date().toISOString() }).eq("id", runRecord.id);
 
-    return ok({ success: true, run_id: runRecord.id, summary, matches_created: matches.length, processed: true });
-
+    return ok({
+      success: true,
+      run_id: runRecord.id,
+      summary,
+      matches_created: matches.length,
+      processed: true,
+      cost: {
+        estimated: estimatedCost,
+        actual: actualCost,
+        deducted: deduction.success,
+        balance_after: deduction.success ? deduction.balance : userBalance,
+      },
+    });
+    
   } catch (e) {
     if (workspaceLocked && workspace_id) {
       await supabase.from("reconciliation_workspaces").update({ status: "error", is_processing: false, processing_started_at: null }).eq("id", workspace_id);

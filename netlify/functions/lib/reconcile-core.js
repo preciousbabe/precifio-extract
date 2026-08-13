@@ -101,6 +101,42 @@ function extractEmbeddedReferences(text) {
 }
 
 
+// ─── Credit Note / Adjustment / Deposit Detection ────────────────────────
+function detectTransactionType(fields) {
+  const typeIndicators = [
+    "type", "transaction_type", "document_type", "category",
+    "entry_type", "record_type", "txn_type", "doc_type"
+  ];
+  let rawType = null;
+  for (const key of typeIndicators) {
+    if (fields?.[key] !== undefined) {
+      rawType = String(fields[key]).toLowerCase();
+      break;
+    }
+  }
+  if (!rawType) return { isCredit: false, isAdjustment: false, isDeposit: false, isPayment: false, raw: null };
+
+  const creditTerms = ["credit", "credit_note", "credit memo", "cr_note", "refund", "return", "cr"];
+  const adjustmentTerms = ["adjustment", "adjust", "write_off", "writeoff", "discount", "rebate", "allowance", "memo"];
+  const depositTerms = ["deposit", "batch", "consolidated", "bulk", "transfer"];
+  const paymentTerms = ["payment", "pay", "receipt", "settlement", "remittance", "paid"];
+
+  return {
+    isCredit: creditTerms.some(t => rawType.includes(t)),
+    isAdjustment: adjustmentTerms.some(t => rawType.includes(t)),
+    isDeposit: depositTerms.some(t => rawType.includes(t)),
+    isPayment: paymentTerms.some(t => rawType.includes(t)),
+    raw: rawType
+  };
+}
+
+function getEffectiveAmount(rawCents, fields) {
+  const type = detectTransactionType(fields);
+  const amt = rawCents / 100;
+  if ((type.isCredit || type.isAdjustment) && amt > 0) return -amt;
+  return amt;
+}
+
 function parseDate(v) {
   if (!v) return null;
   const str = String(v).trim();
@@ -178,8 +214,8 @@ function getDateDirection(fieldNameA, fieldNameB) {
 }
 
 function autoGenerateMatchConfig(sideAFields, sideBFields, aliasMap, docsA = [], docsB = []) {
-  const aCanon = [...new Set(sideAFields)].map(f => ({ raw: f, canon: canonicalizeFieldName(f, aliasMap) }));
-  const bCanon = [...new Set(sideBFields)].map(f => ({ raw: f, canon: canonicalizeFieldName(f, aliasMap) }));
+    const aCanon = [...new Set(sideAFields)].filter(f => !String(f).startsWith("__")).map(f => ({ raw: f, canon: canonicalizeFieldName(f, aliasMap) }));
+    const bCanon = [...new Set(sideBFields)].filter(f => !String(f).startsWith("__")).map(f => ({ raw: f, canon: canonicalizeFieldName(f, aliasMap) }));
   const rules = [];
   const usedA = new Set();
   const usedB = new Set();
@@ -282,7 +318,7 @@ function autoGenerateMatchConfig(sideAFields, sideBFields, aliasMap, docsA = [],
   }
 
     const amountRules = rules.filter(r => r.type === "numeric" && /amount|total|sum|payment|paid|due/.test(r.canonical));
-  const hasAmount = amountRules.length > 0;
+    const hasAmount = amountRules.length > 0;
 
   return {
     rules,
@@ -860,22 +896,33 @@ async function enhanceReportWithOpenAI(report, openaiApiKey) {
 
 function findSubsetSum(items, target, tolAbs, amountField, rules, targetDoc, targetSide = "B", strictRef = false, log = () => {}) {
   const referenceRule = rules.find(r => r.type === "reference" && r.is_gate);
- const vendorRule = rules.find(r => {
-  const canon = (r.canonical || "").toLowerCase();
-  return (canon.includes("vendor") || canon.includes("supplier") || canon.includes("payee")) && r.weight >= 0.1;
-});
+  const vendorRule = rules.find(r => {
+    const canon = (r.canonical || "").toLowerCase();
+    return (canon.includes("vendor") || canon.includes("supplier") || canon.includes("payee")) && r.weight >= 0.1;
+  });
   const targetRef = referenceRule ? normalize(targetDoc.extracted_fields?.[targetSide === "A" ? referenceRule.side_a_field : referenceRule.side_b_field]) : null;
   const targetVen = vendorRule ? normalize(targetDoc.extracted_fields?.[targetSide === "A" ? vendorRule.side_a_field : vendorRule.side_b_field]) : null;
+  const targetType = detectTransactionType(targetDoc.extracted_fields);
 
   log("debug", "subset_sum_start", { target, tolerance: tolAbs, amountField, strictRef, targetVen, targetRef, poolSize: items.length });
 
-  const valid = items.map(it => ({
-    it,
-    amt: (parseMoney(it.extracted_fields?.[amountField]) || { cents: 0 }).cents / 100,
-    ref: referenceRule ? normalize(it.extracted_fields?.[targetSide === "A" ? referenceRule.side_b_field : referenceRule.side_a_field]) : null,
-    ven: vendorRule ? normalize(it.extracted_fields?.[targetSide === "A" ? vendorRule.side_b_field : vendorRule.side_a_field]) : null,
-  })).filter(x => {
-    if (x.amt <= 0) return false;
+  const valid = items.map(it => {
+    const money = parseMoney(it.extracted_fields?.[amountField]) || { cents: 0 };
+    const type = detectTransactionType(it.extracted_fields);
+    const effectiveAmt = getEffectiveAmount(money.cents, it.extracted_fields);
+
+    return {
+      it,
+      money,
+      effectiveAmt,
+      type,
+      ref: referenceRule ? normalize(it.extracted_fields?.[targetSide === "A" ? referenceRule.side_b_field : referenceRule.side_a_field]) : null,
+      ven: vendorRule ? normalize(it.extracted_fields?.[targetSide === "A" ? vendorRule.side_b_field : vendorRule.side_a_field]) : null,
+    };
+  }).filter(x => {
+    if (x.effectiveAmt === 0) return false;
+
+    // Vendor gate
     if (targetVen && x.ven) {
       const sim = similarity(targetVen, x.ven);
       if (sim < 0.8) {
@@ -883,29 +930,32 @@ function findSubsetSum(items, target, tolAbs, amountField, rules, targetDoc, tar
         return false;
       }
     }
-        if (strictRef && targetRef && x.ref) {
+
+    // Reference gate — relaxed for deposits (batch payments rarely carry individual refs)
+    if (strictRef && targetRef && x.ref) {
       const itemRefs = [
         x.ref,
         ...(x.it.extracted_fields?.__extracted_refs || [])
       ].filter(Boolean);
       const hasLink = itemRefs.some(ref => refMatchesTarget(targetRef, ref));
-      if (!hasLink) {
+      if (!hasLink && !x.type.isDeposit && !targetType.isDeposit) {
         log("debug", "subset_sum_ref_filtered", { doc: x.it.document_name, refs: itemRefs });
         return false;
       }
     }
     return true;
-  }).sort((a, b) => b.amt - a.amt);
+  }).sort((a, b) => Math.abs(b.effectiveAmt) - Math.abs(a.effectiveAmt));
 
   log("debug", "subset_sum_valid_pool", { count: valid.length });
 
+  // Greedy
   const greedy = [];
   let remaining = target;
   for (const x of valid) {
-    if (remaining <= tolAbs) break;
-    if (x.amt <= remaining + tolAbs) {
+    if (Math.abs(remaining) <= tolAbs) break;
+    if (x.effectiveAmt <= remaining + tolAbs || x.effectiveAmt < 0) {
       greedy.push(x.it);
-      remaining -= x.amt;
+      remaining -= x.effectiveAmt;
     }
   }
   if (greedy.length > 1 && Math.abs(remaining) <= tolAbs) {
@@ -913,9 +963,10 @@ function findSubsetSum(items, target, tolAbs, amountField, rules, targetDoc, tar
     return greedy;
   }
 
+  // Pair check
   for (let i = 0; i < valid.length; i++) {
     for (let j = i + 1; j < valid.length; j++) {
-      const sum = valid[i].amt + valid[j].amt;
+      const sum = valid[i].effectiveAmt + valid[j].effectiveAmt;
       if (Math.abs(target - sum) <= tolAbs) {
         log("debug", "subset_sum_pair_match", { i: valid[i].it.document_name, j: valid[j].it.document_name, sum });
         return [valid[i].it, valid[j].it];
@@ -923,10 +974,11 @@ function findSubsetSum(items, target, tolAbs, amountField, rules, targetDoc, tar
     }
   }
 
+  // Triple check
   for (let i = 0; i < valid.length; i++) {
     for (let j = i + 1; j < valid.length; j++) {
       for (let k = j + 1; k < valid.length; k++) {
-        const sum = valid[i].amt + valid[j].amt + valid[k].amt;
+        const sum = valid[i].effectiveAmt + valid[j].effectiveAmt + valid[k].effectiveAmt;
         if (Math.abs(target - sum) <= tolAbs) {
           log("debug", "subset_sum_triple_match");
           return [valid[i].it, valid[j].it, valid[k].it];
@@ -938,6 +990,7 @@ function findSubsetSum(items, target, tolAbs, amountField, rules, targetDoc, tar
   log("debug", "subset_sum_no_match");
   return null;
 }
+
 
 function findMatches(docsA, docsB, rules, sumConfig, log = () => {}) {
   const docAMatched = new Set();
@@ -992,41 +1045,123 @@ function findMatches(docsA, docsB, rules, sumConfig, log = () => {}) {
     }
   }
 
-  // ─── PHASE 1: Side A → multiple Side B (partial payments) ─────────────
+    // ─── PHASE 1: Side A → multiple Side B (partial payments + credits) ───
   if (sumConfig?.enabled && sumConfig.side_a_amount_field && sumConfig.side_b_amount_field) {
     log("debug", "phase_1_sum_matching_start", { aField: sumConfig.side_a_amount_field, bField: sumConfig.side_b_amount_field });
+
+    const vendorRule = rules.find(r => {
+      const canon = (r.canonical || "").toLowerCase();
+      return (canon.includes("vendor") || canon.includes("supplier") || canon.includes("payee")) && r.weight >= 0.1;
+    });
+
     for (const a of docsA) {
       if (docAMatched.has(a.id)) continue;
       const targetMoney = parseMoney(a.extracted_fields?.[sumConfig.side_a_amount_field]);
       const target = targetMoney ? targetMoney.cents / 100 : 0;
       if (!target) continue;
+
+      const targetVen = vendorRule ? normalize(a.extracted_fields?.[vendorRule.side_a_field]) : null;
       const pool = docsB.filter(b => !docBMatched.has(b.id));
+
+      // Separate credits/adjustments from regular payments (same vendor only)
+      const creditItems = [];
+      const regularPool = [];
+      for (const b of pool) {
+        const type = detectTransactionType(b.extracted_fields);
+        const bVen = vendorRule ? normalize(b.extracted_fields?.[vendorRule.side_b_field]) : null;
+        const venMatch = !targetVen || !bVen || similarity(targetVen, bVen) >= 0.8;
+
+        if ((type.isCredit || type.isAdjustment) && venMatch) {
+          creditItems.push(b);
+        } else {
+          regularPool.push(b);
+        }
+      }
+
+      // Calculate credit total (absolute value)
+      const creditTotal = creditItems.reduce((sum, b) => {
+        const money = parseMoney(b.extracted_fields?.[sumConfig.side_b_amount_field]);
+        return sum + Math.abs(money?.cents || 0);
+      }, 0) / 100;
+
+            const adjustedTarget = target - creditTotal;
+      if (adjustedTarget <= 0) continue;
+
       const tolPct = (sumConfig.tolerance_percent || 0) / 100;
-      const tolAbs = target * tolPct + 0.01;
-      log("debug", "phase_1_attempt", { doc: a.document_name, target, poolSize: pool.length });
-      const subset = findSubsetSum(pool, target, tolAbs, sumConfig.side_b_amount_field, rules, a, "A", true, log);
+      const tolAbs = adjustedTarget * tolPct + 0.01;
+
+      log("debug", "phase_1_attempt", { doc: a.document_name, target, adjustedTarget, creditTotal, poolSize: regularPool.length });
+
+      // ─── Fast path: single payment + credit note = exact net match ──────
+      let subset = null;
+      const exactSingle = regularPool.find(b => {
+        const money = parseMoney(b.extracted_fields?.[sumConfig.side_b_amount_field]);
+        const amt = money ? money.cents / 100 : 0;
+        return Math.abs(amt - adjustedTarget) <= tolAbs;
+      });
+      if (exactSingle && creditItems.length > 0) {
+        log("debug", "phase_1_fast_match", { doc: a.document_name, payment: exactSingle.document_name, credits: creditItems.length });
+        subset = [exactSingle];
+      } else {
+        subset = findSubsetSum(regularPool, adjustedTarget, tolAbs, sumConfig.side_b_amount_field, rules, a, "A", true, log);
+      }
+
       if (subset) {
-        log("debug", "phase_1_match", { doc: a.document_name, subsetCount: subset.length });
-        for (const b of subset) {
+        const fullSubset = [...subset, ...creditItems];
+        log("debug", "phase_1_match", { doc: a.document_name, subsetCount: fullSubset.length, credits: creditItems.length });
+
+        const subsetAnalysis = fullSubset.map(s => ({
+          doc: s,
+          amount: parseMoney(s.extracted_fields?.[sumConfig.side_b_amount_field]),
+          type: detectTransactionType(s.extracted_fields)
+        }));
+        const grossCents = subsetAnalysis.reduce((sum, x) => sum + Math.abs(x.amount?.cents || 0), 0);
+        const creditCount = creditItems.length;
+        const netCents = targetMoney.cents;
+
+        for (const b of fullSubset) {
+          const bAnalysis = subsetAnalysis.find(x => x.doc.id === b.id);
+          const bType = bAnalysis?.type;
+          const isCreditItem = bType?.isCredit || bType?.isAdjustment;
+
           matches.push({
             docA_id: a.id, docB_id: b.id,
             type: "partial_sum", status: "review", score: 85,
-            reasons: { amount_sum: true, item_count: subset.length },
+            reasons: { amount_sum: true, item_count: fullSubset.length, has_credits: creditCount > 0 },
             gate_failures: [], warnings: [],
             investigative_report: {
               verdict: "review", confidence: "medium", match_type: "partial_sum",
-              summary_narrative: `Invoice of ${targetMoney.formatted} matched against ${subset.length} partial payments totaling approximately the same amount.`,
+              summary_narrative: creditCount > 0
+                ? `Invoice of ${targetMoney.formatted} reconciled against ${fullSubset.length} items (net after credits: ${targetMoney.formatted}).`
+                : `Invoice of ${targetMoney.formatted} matched against ${fullSubset.length} partial payments totaling approximately the same amount.`,
               deterministic_analysis: {
                 amount: {
                   side_a: { raw: a.extracted_fields?.[sumConfig.side_a_amount_field], formatted: targetMoney.formatted },
-                  side_b: { item_count: subset.length, note: "Multiple payments combined" },
+                  side_b: {
+                    item_count: fullSubset.length,
+                    note: isCreditItem ? `${bType.isCredit ? "Credit" : "Adjustment"}: ${bAnalysis.amount?.formatted}` : "Partial payment",
+                    is_credit: isCreditItem,
+                    raw: b.extracted_fields?.[sumConfig.side_b_amount_field],
+                    formatted: bAnalysis.amount?.formatted
+                  },
+                  net_reconciled: targetMoney.formatted,
+                  gross_total: (grossCents / 100).toFixed(2),
                 },
               },
-              investigative_notes: [{
-                type: "partial_payment", severity: "medium",
-                narrative: `This invoice appears to have been paid in ${subset.length} installments. Verify all payment references align.`,
-                suggested_actions: ["Cross-check each payment reference", "Verify no duplicate payments included"],
-              }],
+              investigative_notes: [
+                ...(creditCount > 0 ? [{
+                  type: "credit_or_adjustment",
+                  severity: "medium",
+                  narrative: `This reconciliation includes ${creditCount} credit note(s) or adjustment(s). Net amount after credits is ${targetMoney.formatted}.`,
+                  suggested_actions: ["Verify credit notes are correctly applied", "Check remaining balance after adjustments", "Ensure discount terms were authorized"],
+                }] : []),
+                {
+                  type: "partial_payment",
+                  severity: "medium",
+                  narrative: `This invoice appears to have been paid in ${fullSubset.length} installment(s). Verify all payment references align.`,
+                  suggested_actions: ["Cross-check each payment reference", "Verify no duplicate payments included"],
+                }
+              ],
             },
           });
           docBMatched.add(b.id);
@@ -1049,28 +1184,65 @@ function findMatches(docsA, docsB, rules, sumConfig, log = () => {}) {
       const tolAbs = target * tolPct + 0.01;
       log("debug", "phase_2_attempt", { doc: b.document_name, target, poolSize: pool.length });
       const subset = findSubsetSum(pool, target, tolAbs, sumConfig.side_a_amount_field, rules, b, "B", true, log);
-      if (subset) {
+            if (subset) {
         log("debug", "phase_2_match", { doc: b.document_name, subsetCount: subset.length });
+        const subsetAnalysis = subset.map(s => ({
+          doc: s,
+          amount: parseMoney(s.extracted_fields?.[sumConfig.side_a_amount_field]),
+          type: detectTransactionType(s.extracted_fields)
+        }));
+        const hasCredits = subsetAnalysis.some(x => x.type.isCredit || x.type.isAdjustment);
+        const targetType = detectTransactionType(b.extracted_fields);
+
         for (const a of subset) {
+          const aAnalysis = subsetAnalysis.find(x => x.doc.id === a.id);
+          const aType = aAnalysis?.type;
+          const isCreditItem = aType?.isCredit || aType?.isAdjustment;
+
           matches.push({
             docA_id: a.id, docB_id: b.id,
             type: "split", status: "review", score: 80,
-            reasons: { amount_split: true, item_count: subset.length },
+            reasons: { amount_split: true, item_count: subset.length, has_credits: hasCredits },
             gate_failures: [], warnings: [],
             investigative_report: {
               verdict: "review", confidence: "medium", match_type: "split",
-              summary_narrative: `Payment of ${targetMoney.formatted} appears to cover ${subset.length} invoices.`,
+              summary_narrative: hasCredits
+                ? `Payment of ${targetMoney.formatted} covers ${subset.length} invoice item(s) including credits/adjustments.`
+                : targetType.isDeposit
+                  ? `Deposit/batch payment of ${targetMoney.formatted} allocated across ${subset.length} invoices. No individual references expected.`
+                  : `Payment of ${targetMoney.formatted} appears to cover ${subset.length} invoices.`,
               deterministic_analysis: {
                 amount: {
-                  side_a: { item_count: subset.length, note: "Multiple invoices combined" },
+                  side_a: {
+                    item_count: subset.length,
+                    note: isCreditItem ? `Credit/Adjustment: ${aAnalysis.amount?.formatted}` : "Invoice line",
+                    is_credit: isCreditItem,
+                    raw: a.extracted_fields?.[sumConfig.side_a_amount_field],
+                    formatted: aAnalysis.amount?.formatted
+                  },
                   side_b: { raw: b.extracted_fields?.[sumConfig.side_b_amount_field], formatted: targetMoney.formatted },
                 },
               },
-              investigative_notes: [{
-                type: "consolidated_payment", severity: "medium",
-                narrative: `This payment covers multiple invoices. Ensure each invoice is correctly allocated.`,
-                suggested_actions: ["Verify invoice allocation matches payment", "Check for unallocated balances"],
-              }],
+              investigative_notes: [
+                ...(hasCredits ? [{
+                  type: "credit_or_adjustment",
+                  severity: "medium",
+                  narrative: "This consolidated payment includes credit notes or adjustments. Verify net allocation per invoice.",
+                  suggested_actions: ["Confirm credit notes offset correct invoices", "Check unallocated payment balance"],
+                }] : []),
+                ...(targetType.isDeposit ? [{
+                  type: "batch_deposit",
+                  severity: "low",
+                  narrative: "This is a batch deposit or consolidated transfer. Individual invoice references may not appear on the bank line.",
+                  suggested_actions: ["Verify deposit slip or remittance advice", "Confirm total matches sum of allocated invoices"],
+                }] : []),
+                {
+                  type: "consolidated_payment",
+                  severity: "medium",
+                  narrative: `This payment covers multiple invoices. Ensure each invoice is correctly allocated.`,
+                  suggested_actions: ["Verify invoice allocation matches payment", "Check for unallocated balances"],
+                }
+              ],
             },
           });
           docAMatched.add(a.id);
@@ -1267,9 +1439,11 @@ module.exports = {
   dateSemanticScore, getDateDirection,
   autoGenerateMatchConfig, validateConfig,
   scorePair, classifyMatch, buildInvestigativeReport,
-  buildUnmatchedReport,        
+  buildUnmatchedReport,
   enhanceReportWithOpenAI,
   findSubsetSum, findMatches,
-  refMatchesTarget,            
-  extractEmbeddedReferences,   
+  refMatchesTarget,
+  extractEmbeddedReferences,
+  detectTransactionType,
+  getEffectiveAmount,
 };

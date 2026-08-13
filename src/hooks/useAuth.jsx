@@ -3,11 +3,12 @@
 import { useState, useEffect, createContext, useContext, useCallback, useRef } from 'react';
 import { clearGuestSession } from '../utils/guestSession';
 
+
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const tokenOnLoad = typeof window !== 'undefined' ? localStorage.getItem('precifio_token') : null;
-
+  const [authModalMessage, setAuthModalMessage] = useState('');
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -86,6 +87,17 @@ export function AuthProvider({ children }) {
       setIsGuest(true);
     }
   }, [fetchUser]);
+
+
+  useEffect(() => {
+  const handleShowModal = (e) => {
+    setAuthModalMode(e.detail?.mode || 'login');
+    setAuthModalMessage(e.detail?.message || '');
+    setShowAuthModal(true);
+  };
+  window.addEventListener('showAuthModal', handleShowModal);
+  return () => window.removeEventListener('showAuthModal', handleShowModal);
+}, []);
 
   // Listen for storage changes (other tabs logging out)
   useEffect(() => {
@@ -181,14 +193,15 @@ export function AuthProvider({ children }) {
     setIsGuest(true);
   }, []);
 
-  const requireAuth = useCallback((action) => {
-    if (isGuest) {
-      setAuthModalMode(action === 'signup' ? 'signup' : 'login');
-      setShowAuthModal(true);
-      return false;
-    }
-    return true;
-  }, [isGuest]);
+ const requireAuth = useCallback((action, message) => {
+  if (isGuest) {
+    setAuthModalMode(action === 'signup' ? 'signup' : 'login');
+    setAuthModalMessage(message || '');
+    setShowAuthModal(true);
+    return false;
+  }
+  return true;
+}, [isGuest]);
 
   const handleGuestLimit = useCallback(() => {
     setGuestLimitReached(true);
@@ -203,6 +216,8 @@ export function AuthProvider({ children }) {
     isGuest,
     loading,
     guestLimitReached,
+    authModalMessage,
+    setAuthModalMessage,
     login,
     signup,
     logout,

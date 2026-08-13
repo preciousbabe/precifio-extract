@@ -7,7 +7,7 @@
   command = "vite"
   targetPort = 5173
   functions = "netlify/functions"
-  # ❌ DON'T put publish = "dist" here — dist doesn't exist in dev
+  framework = "#custom"  
 
 # ── STATIC PAGES (BEFORE the SPA catch-all) ──
 [[redirects]]
@@ -20,9 +20,9 @@
   to = "/privacy.html"
   status = 200
 
-  [[redirects]]
-  from = "/reconcile-guide" 
-  to = "/reconcile-guide.html" 
+ [[redirects]]
+  from = "/reconcile-guide"
+  to = "/reconcile-guide.html"
   status = 200
 
 [[redirects]]

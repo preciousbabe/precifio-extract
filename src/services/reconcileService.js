@@ -17,7 +17,7 @@ async function api(path, opts = {}) {
   if (!res.ok) {
     const msg = typeof data.error === "string" ? data.error : (data.error?.message || data.error?.error || JSON.stringify(data.error) || "Request failed");
     const err = new Error(msg);
-    err.code = data.code || null;
+    err.code = data.error?.code || data.code || null;
     err.status = res.status;
     throw err;
   }
@@ -60,8 +60,30 @@ export const reconcileService = {
       body: JSON.stringify({ workspace_id, configuration }),
     }),
 
-  runReconciliation: (workspace_id) =>
-    api("/reconcile-run", { method: "POST", body: JSON.stringify({ workspace_id }) }),
+ runReconciliation: async (workspace_id) => {
+  const data = await api("/reconcile-run", {
+    method: "POST",
+    body: JSON.stringify({ workspace_id }),
+  });
+
+  // Update the global credit badge immediately after
+  // a successful reconciliation charge.
+  if (
+    data?.cost?.deducted === true &&
+    typeof data?.cost?.balance_after === "number"
+  ) {
+    window.dispatchEvent(
+      new CustomEvent("creditsUpdated", {
+        detail: {
+          newBalance: data.cost.balance_after,
+          source: "reconciliation",
+        },
+      })
+    );
+  }
+
+  return data;
+},
 
     getResults: (workspace_id, status, side) => {
     const params = new URLSearchParams({ workspace_id });
