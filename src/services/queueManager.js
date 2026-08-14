@@ -1,31 +1,6 @@
 // src/services/queueManager.js
+import { getGuestId, getDeviceFingerprint, getDeviceId } from '../utils/guestSession';
 const API_BASE = import.meta.env.VITE_API_URL || "/.netlify/functions";
-
-function getGuestId() {
-  let id = localStorage.getItem('precifio_guest_id');
-  if (!id) { id = crypto.randomUUID(); localStorage.setItem('precifio_guest_id', id); }
-  return id;
-}
-
-// src/services/queueManager.js
-// Add this helper at the top of the file
-function getDeviceFingerprint() {
-  const raw = [
-    navigator.userAgent,
-    navigator.language,
-    screen.width,
-    screen.height,
-    screen.colorDepth,
-    new Date().getTimezoneOffset()
-  ].join('|');
-  let hash = 0;
-  for (let i = 0; i < raw.length; i++) {
-    const char = raw.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash;
-  }
-  return String(hash);
-}
 
 
 function getAuthHeaders() {
@@ -35,6 +10,7 @@ function getAuthHeaders() {
     : { "X-Guest-Id": getGuestId() };
   
   headers["X-Device-Fingerprint"] = getDeviceFingerprint();
+  headers["X-Device-Id"] = getDeviceId();        
   return headers;
 }
 
@@ -67,6 +43,12 @@ async function pollExistingJob(jobId, onProgress) {
       continue;
     }
 
+        if (pollRes.status === 403) {
+      const data = await pollRes.json().catch(() => ({}));
+      const error = new Error(data.error || "Unauthorized job access.");
+      error.status = 403; error.code = "JOB_UNAUTHORIZED"; error.jobId = jobId; throw error;
+    }
+
     if (pollRes.status === 404) {
       const error = new Error("Extraction job could not be found.");
       error.status = 404; error.code = "JOB_NOT_FOUND"; error.jobId = jobId; throw error;
@@ -94,11 +76,11 @@ async function recoverExistingJob(jobId, onProgress) {
   if (!jobId) return null;
   try { return await pollExistingJob(jobId, onProgress); }
   catch (error) {
-    console.warn("Recovery did not complete:", error.message);
-    if (error.status === 404 || error.code === "JOB_STALE") return null;
-    throw error;
+   console.warn("Recovery did not complete:", error.message);
+  if (error.status === 404 || error.status === 403 || error.code === "JOB_STALE") return null;
   }
 }
+
 
 async function uploadWithPoll(url, file, onProgress, jobId = null) {
   const MAX_RETRIES = 3;
@@ -172,7 +154,15 @@ class QueueManager {
     onProgress({ stage: "uploading", progress: 5 });
     onProgress({ stage: "sending", progress: 15 });
 
-    const result = await uploadWithPoll(API_BASE + "/extract", file, onProgress, jobId);
+let result;
+try {
+  result = await uploadWithPoll(API_BASE + "/extract", file, onProgress, jobId);
+} catch (error) {
+  if (error.isGuest && [402, 403, 429].includes(error.status)) {
+    alert("This device has already exhausted the guest period. Sign up to enjoy free 10 credits.");
+  }
+  throw error;
+}
 
     onProgress({ stage: "saving", progress: 95 });
     onProgress({ stage: "completed", progress: 100 });

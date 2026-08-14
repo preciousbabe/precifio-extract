@@ -78,7 +78,7 @@ exports.handler = async (event, context) => {
     // ── Auth ──
     const authHeader = event.headers.authorization || event.headers.Authorization;
     const token = authHeader ? authHeader.replace("Bearer ", "") : null;
-    const guestId = event.headers["x-guest-id"] || null;
+    const guestId = event.headers["x-guest-id"] || event.headers["X-Guest-Id"] || null;
 
     let userId = null;
     let isGuest = true;
@@ -90,7 +90,7 @@ exports.handler = async (event, context) => {
       if (!authError && user) { userId = user.id; isGuest = false; }
     }
 
-    const requestedJobId = getRequestedJobId(event);
+    let requestedJobId = getRequestedJobId(event);
 
     // ── Idempotency key ──
     const idempotencyKey = crypto.createHash("sha256").update(
@@ -104,58 +104,126 @@ exports.handler = async (event, context) => {
       }
 
       const clientIp = event.headers['x-nf-client-connection-ip'] || event.headers['x-forwarded-for']?.split(',')[0]?.trim() || 'unknown';
+      const deviceFingerprint = event.headers["x-device-fingerprint"] || event.headers["X-Device-Fingerprint"] || "unknown";
+      const deviceId = event.headers["x-device-id"] || event.headers["X-Device-Id"] || "unknown";
 
-      const { data: ipCheck } = await supabase.from("guest_extractions").select("extraction_count").eq("ip_address", clientIp).maybeSingle();
-      if (ipCheck && ipCheck.extraction_count >= 3) {
-        return { statusCode: 429, headers, body: JSON.stringify({ error: "Free extraction limit reached for this network. Please sign up to continue.", code: "GUEST_IP_LIMIT_REACHED", isGuest: true }) };
+      // ── 1. Is this a retry of a failed job? ──
+      let isRetry = false;
+      let failedJobId = null;
+
+      if (requestedJobId) {
+        const { data: prevJob } = await supabase
+          .from("extractions")
+          .select("id, status, guest_id, idempotency_key")
+          .eq("id", requestedJobId)
+          .maybeSingle();
+        if (prevJob && prevJob.guest_id === guestId && prevJob.status === "failed") {
+          isRetry = true;
+          failedJobId = prevJob.id;
+        }
       }
 
-      const deviceFingerprint = event.headers["x-device-fingerprint"] || "unknown";
-
-      const { data: fpCheck } = await supabase
-        .from("guest_extractions")
-        .select("extraction_count")
-        .eq("device_fingerprint", deviceFingerprint)
-        .maybeSingle();
-
-      if (fpCheck && fpCheck.extraction_count >= 1) {
-        return {
-          statusCode: 402,
-          headers,
-          body: JSON.stringify({
-            error: "Free extraction used on this device. Please sign up to continue.",
-            code: "GUEST_FINGERPRINT_LIMIT_REACHED",
-            isGuest: true,
-          }),
-        };
+      if (!isRetry) {
+        const { data: prevJob } = await supabase
+          .from("extractions")
+          .select("id, status, guest_id")
+          .eq("guest_id", guestId)
+          .eq("idempotency_key", idempotencyKey)
+          .eq("status", "failed")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (prevJob) {
+          isRetry = true;
+          failedJobId = prevJob.id;
+        }
       }
 
-      const { data: guestRecord } = await supabase.from("guest_extractions").select("extraction_count, first_used").eq("guest_id", guestId).maybeSingle();
-      const extractionCount = guestRecord ? guestRecord.extraction_count : 0;
-      const daysActive = guestRecord ? (Date.now() - new Date(guestRecord.first_used).getTime()) / (1000 * 60 * 60 * 24) : 0;
-
-      if (daysActive > 30 && extractionCount > 0) {
-        return { statusCode: 403, headers, body: JSON.stringify({ error: "Guest session expired (30 days). Please sign up to continue.", code: "GUEST_EXPIRED", isGuest: true }) };
-      }
-      if (extractionCount >= 1) {
-        return { statusCode: 402, headers, body: JSON.stringify({ error: "Free extraction used (1/1). Sign up for more.", code: "GUEST_LIMIT_REACHED", isGuest: true }) };
+      if (isRetry && failedJobId && !requestedJobId) {
+        requestedJobId = failedJobId;
       }
 
-      // ── CRITICAL: Mark as used IMMEDIATELY so parallel/sequential uploads are blocked ──
-      if (!guestRecord) {
-        await supabase.from("guest_extractions").insert({
-          guest_id: guestId,
-          ip_address: clientIp,
-          device_fingerprint: deviceFingerprint,
-          extraction_count: 1,        // ← Used NOW, not after background finishes
-          first_used: new Date().toISOString(),
-          last_used: new Date().toISOString(),
-        });
-      } else {
-        await supabase.from("guest_extractions").update({
-          extraction_count: 1,        // ← Used NOW
-          last_used: new Date().toISOString(),
-        }).eq("guest_id", guestId);
+      // ── 2. Hard limits (only for brand-new extractions) ──
+      if (!isRetry) {
+        // 2a. IP limit: sum across ALL guest records for this IP
+        const { data: ipRecords } = await supabase
+          .from("guest_extractions")
+          .select("extraction_count")
+          .eq("ip_address", clientIp);
+        const totalIpExtractions = (ipRecords || []).reduce((sum, r) => sum + (r.extraction_count || 0), 0);
+        if (totalIpExtractions >= 3) {
+          return { statusCode: 429, headers, body: JSON.stringify({ error: "Free extraction limit reached for this network. Please sign up to continue.", code: "GUEST_IP_LIMIT_REACHED", isGuest: true }) };
+        }
+
+        // 2b. Device fingerprint limit: ANY record with this fingerprint?
+        const { data: fpRecords } = await supabase
+          .from("guest_extractions")
+          .select("extraction_count")
+          .eq("device_fingerprint", deviceFingerprint);
+        const hasFpExtraction = (fpRecords || []).some(r => (r.extraction_count || 0) >= 1);
+        if (hasFpExtraction) {
+          return { statusCode: 402, headers, body: JSON.stringify({ error: "Free extraction used on this device. Please sign up to continue.", code: "GUEST_FINGERPRINT_LIMIT_REACHED", isGuest: true }) };
+        }
+
+        // 2c. Device ID limit: ANY record with this device_id?
+        if (deviceId !== "unknown") {
+          const { data: devRecords } = await supabase
+            .from("guest_extractions")
+            .select("extraction_count")
+            .eq("device_id", deviceId);
+          const hasDevExtraction = (devRecords || []).some(r => (r.extraction_count || 0) >= 1);
+          if (hasDevExtraction) {
+            return { statusCode: 402, headers, body: JSON.stringify({ error: "Free extraction used on this device. Please sign up to continue.", code: "GUEST_DEVICE_LIMIT_REACHED", isGuest: true }) };
+          }
+        }
+
+        // 2d. Strict mode: same IP with a different fingerprint already extracted?
+        // This stops users from rotating fingerprints on the same network.
+        const { data: ipFpRecords } = await supabase
+          .from("guest_extractions")
+          .select("device_fingerprint, extraction_count")
+          .eq("ip_address", clientIp)
+          .neq("device_fingerprint", deviceFingerprint);
+        const ipHasOtherDevice = (ipFpRecords || []).some(r => (r.extraction_count || 0) >= 1);
+        if (ipHasOtherDevice && totalIpExtractions >= 1) {
+          return { statusCode: 429, headers, body: JSON.stringify({ error: "Free extraction limit reached for this network. Please sign up to continue.", code: "GUEST_IP_LIMIT_REACHED", isGuest: true }) };
+        }
+
+        // 2e. Guest ID limit
+        const { data: guestRecord } = await supabase
+          .from("guest_extractions")
+          .select("extraction_count, first_used")
+          .eq("guest_id", guestId)
+          .maybeSingle();
+        const extractionCount = guestRecord ? guestRecord.extraction_count : 0;
+        const daysActive = guestRecord ? (Date.now() - new Date(guestRecord.first_used).getTime()) / (1000 * 60 * 60 * 24) : 0;
+
+        if (daysActive > 30 && extractionCount > 0) {
+          return { statusCode: 403, headers, body: JSON.stringify({ error: "Guest session expired (30 days). Please sign up to continue.", code: "GUEST_EXPIRED", isGuest: true }) };
+        }
+        if (extractionCount >= 1) {
+          return { statusCode: 402, headers, body: JSON.stringify({ error: "Free extraction used (1/1). Sign up for more.", code: "GUEST_LIMIT_REACHED", isGuest: true }) };
+        }
+
+        // ── Mark as used IMMEDIATELY ──
+        if (!guestRecord) {
+          await supabase.from("guest_extractions").insert({
+            guest_id: guestId,
+            ip_address: clientIp,
+            device_fingerprint: deviceFingerprint,
+            device_id: deviceId !== "unknown" ? deviceId : null,
+            extraction_count: 1,
+            first_used: new Date().toISOString(),
+            last_used: new Date().toISOString(),
+          });
+        } else {
+          await supabase.from("guest_extractions").update({
+            extraction_count: 1,
+            device_fingerprint: deviceFingerprint, // update in case it changed
+            device_id: deviceId !== "unknown" ? deviceId : guestRecord.device_id,
+            last_used: new Date().toISOString(),
+          }).eq("guest_id", guestId);
+        }
       }
     }
 
@@ -201,7 +269,7 @@ exports.handler = async (event, context) => {
     }
 
     // ── Stale job detection ──
-    const STALE_MINUTES = 5;
+    const STALE_MINUTES = 10;
     if (cachedJob?.status === "processing") {
       const updatedAt = new Date(cachedJob.updated_at);
       const staleMinutes = (Date.now() - updatedAt.getTime()) / 60000;

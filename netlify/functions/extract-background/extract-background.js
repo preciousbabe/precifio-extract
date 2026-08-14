@@ -98,13 +98,17 @@ async function cleanupOrphanedFiles(supabase) {
   try {
     const { data: oldJobs } = await supabase
       .from("extractions")
-      .select("storage_path")
+      .select("storage_path, id")
       .lt("created_at", new Date(Date.now() - 60 * 60 * 1000).toISOString())
-      .not("storage_path", "is", null);
+      .not("storage_path", "is", null)
+      .in("status", ["completed", "failed"]); // ← only finished jobs
 
     if (oldJobs?.length > 0) {
       const paths = oldJobs.map(j => j.storage_path).filter(Boolean);
       await supabase.storage.from("extraction-uploads").remove(paths);
+      await supabase.from("extractions")
+        .update({ storage_path: null })
+        .in("id", oldJobs.map(j => j.id));
       console.log(`Cleaned up ${paths.length} orphaned files`);
     }
   } catch (e) {

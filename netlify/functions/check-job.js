@@ -3,7 +3,7 @@ const { createClient } = require("@supabase/supabase-js");
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
-const STALE_MINUTES = 5;
+const STALE_MINUTES = 10;
 
 exports.handler = async (event) => {
   const headers = {
@@ -41,7 +41,15 @@ exports.handler = async (event) => {
     const belongsToCurrentRequester =
       (job.user_id && userId && job.user_id === userId) ||
       (job.guest_id && guestId && job.guest_id === guestId);
-    if (!belongsToCurrentRequester) return { statusCode: 404, headers, body: JSON.stringify({ error: "Job not found", jobId }) };
+    
+    if (!belongsToCurrentRequester) {
+      return { 
+        statusCode: 403, 
+        headers, 
+        body: JSON.stringify({ error: "Unauthorized", jobId, hint: "Check x-guest-id header" }) 
+      };
+    }
+
 
     // Stale detection
     if (job.status === "processing") {

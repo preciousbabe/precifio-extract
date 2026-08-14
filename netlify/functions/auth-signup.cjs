@@ -24,27 +24,29 @@ exports.handler = async (event, context) => {
   }
 
   const { email, password, fullName, companyName } = JSON.parse(event.body);
+  const normalizedEmail = email?.trim().toLowerCase();
+  const normalizedCompany = companyName?.trim();
 
   // Rate limit: max 3 signup attempts per IP per hour
-const clientIp = event.headers['x-nf-client-connection-ip'] || 
-                 event.headers['x-forwarded-for']?.split(',')[0]?.trim() || 
-                 'unknown';
+  const clientIp = event.headers['x-nf-client-connection-ip'] || 
+                   event.headers['x-forwarded-for']?.split(',')[0]?.trim() || 
+                   'unknown';
 
-const { data: recentSignups } = await supabase
-  .from('profiles')
-  .select('id', { count: 'exact' })
-  .eq('signup_ip', clientIp)  // You'll need to add this column
-  .gte('created_at', new Date(Date.now() - 60 * 60 * 1000).toISOString());
+  const { data: recentSignups } = await supabase
+    .from('profiles')
+    .select('id', { count: 'exact' })
+    .eq('signup_ip', clientIp)
+    .gte('created_at', new Date(Date.now() - 60 * 60 * 1000).toISOString());
 
-if (recentSignups && recentSignups.length >= 3) {
-  return {
-    statusCode: 429,
-    headers,
-    body: JSON.stringify({ error: 'Too many signup attempts from this network. Please try again later.' })
-  };
-}
+  if (recentSignups && recentSignups.length >= 3) {
+    return {
+      statusCode: 429,
+      headers,
+      body: JSON.stringify({ error: 'Too many signup attempts from this network. Please try again later.' })
+    };
+  }
 
-    // ── Block disposable emails ──
+  // ── Block disposable emails ──
   const DISPOSABLE_DOMAINS = new Set([
     'tempmail.com','mailinator.com','guerrillamail.com','yopmail.com',
     'sharklasers.com','getairmail.com','10minutemail.com','burnermail.io',
@@ -59,8 +61,8 @@ if (recentSignups && recentSignups.length >= 3) {
     'chacuo.net','tmpmail.org','tempm.com','temp-mail.io','throwaway.com'
   ]);
   
-  const domain = email.split('@')[1]?.toLowerCase().trim();
-  if (!domain || DISPOSABLE_DOMAINS.has(domain) || domain.includes('temp') || domain.includes('tmp') || domain.includes('throw') || domain.includes('fake') || domain.includes('trash')) {
+  const domain = normalizedEmail.split('@')[1];
+  if (!domain || DISPOSABLE_DOMAINS.has(domain) || /temp|tmp|throw|fake|trash/.test(domain)) {
     return { 
       statusCode: 400, 
       headers, 
@@ -69,19 +71,47 @@ if (recentSignups && recentSignups.length >= 3) {
   }
   // ──────────────────────────────
 
-  if (!email || !password || !fullName || !companyName) {
+  if (!normalizedEmail || !password || !fullName || !normalizedCompany) {
     return { statusCode: 400, headers, body: JSON.stringify({ error: 'All fields required' }) };
   }
 
+  // ── Uniqueness pre-checks ──
+  const { data: existingEmail } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('email', normalizedEmail)
+    .maybeSingle();
+
+  if (existingEmail) {
+    return { statusCode: 409, headers, body: JSON.stringify({ error: 'Email already exists' }) };
+  }
+
+  const { data: existingCompany } = await supabase
+    .from('profiles')
+    .select('id')
+    .ilike('company_name', normalizedCompany)
+    .maybeSingle();
+
+  if (existingCompany) {
+    return { statusCode: 409, headers, body: JSON.stringify({ error: 'Company name already exists' }) };
+  }
+  // ───────────────────────────
+
   try {
     const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-      email,
+      email: normalizedEmail,
       password,
       email_confirm: false,
-      user_metadata: { full_name: fullName, company_name: companyName }
+      user_metadata: { full_name: fullName, company_name: normalizedCompany }
     });
 
-    if (authError) throw authError;
+    if (authError) {
+      // Supabase Auth duplicate email fallback
+      if (authError.message?.toLowerCase().includes('already registered')) {
+        return { statusCode: 409, headers, body: JSON.stringify({ error: 'Email already exists' }) };
+      }
+      throw authError;
+    }
 
     const userId = authData.user.id;
 
@@ -89,15 +119,28 @@ if (recentSignups && recentSignups.length >= 3) {
       .from('profiles')
       .insert({
         id: userId,
-        email,
+        email: normalizedEmail,
         full_name: fullName,
-        company_name: companyName,
+        company_name: normalizedCompany,
         credits_remaining: 10,
         signup_ip: clientIp, 
         created_at: new Date().toISOString()
       });
 
-    if (profileError) throw profileError;
+    if (profileError) {
+      // Clean up orphaned auth user so you don't leave ghost accounts
+      await supabase.auth.admin.deleteUser(userId).catch(() => {});
+
+      if (profileError.message?.includes('duplicate key value violates unique constraint')) {
+        if (profileError.message?.includes('company_name')) {
+          return { statusCode: 409, headers, body: JSON.stringify({ error: 'Company name already exists' }) };
+        }
+        if (profileError.message?.includes('email')) {
+          return { statusCode: 409, headers, body: JSON.stringify({ error: 'Email already exists' }) };
+        }
+      }
+      throw profileError;
+    }
 
     // Log the signup bonus
     await supabase.from('credit_transactions').insert({
@@ -109,7 +152,7 @@ if (recentSignups && recentSignups.length >= 3) {
       metadata: {
         reason: 'signup_bonus',
         full_name: fullName,
-        company_name: companyName
+        company_name: normalizedCompany
       }
     });
 
@@ -121,14 +164,14 @@ if (recentSignups && recentSignups.length >= 3) {
       },
       body: JSON.stringify({
         from: 'Precifio <noreply@precifio.app>',
-        to: email,
+        to: normalizedEmail,
         subject: 'Welcome to Precifio Extract!',
         html: `
           <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
             <h2 style="color: #1e40af;">Welcome to Precifio Extract, ${fullName}!</h2>
-            <p>Your company <strong>${companyName}</strong> is now registered.</p>
+            <p>Your company <strong>${normalizedCompany}</strong> is now registered.</p>
             <p>You have <strong>10 credits</strong> to start extracting documents.</p>
-            <p>Login with your company name: <strong>${companyName}</strong></p>
+            <p>Login with your company name: <strong>${normalizedCompany}</strong></p>
             <br/>
             <p style="margin-top: 20px;">
               <a href="https://extract.precifio.app?mode=login" style="background: #1e40af; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block;">Log In to Precifio</a>
@@ -147,7 +190,7 @@ if (recentSignups && recentSignups.length >= 3) {
       body: JSON.stringify({
         success: true,
         message: 'Account created successfully! Check your email.',
-        user: { id: userId, email, fullName, companyName }
+        user: { id: userId, email: normalizedEmail, fullName, companyName: normalizedCompany }
       })
     };
 
