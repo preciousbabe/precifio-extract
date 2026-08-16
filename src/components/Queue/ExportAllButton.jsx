@@ -75,14 +75,16 @@ export default function ExportAllButton({ items, config = {} }) {
 
   if (format === "reconcile") {
   if (isGuest) {
-    window.dispatchEvent(
-      new CustomEvent("showAuthModal", {
-        detail: {
-          mode: "signup",
-          message: "Reconciliation is available for registered users only. Sign up to match invoices, payments, and detect anomalies automatically.",
-        },
-      })
-    );
+  window.dispatchEvent(
+  new CustomEvent("showAuthModal", {
+    detail: {
+      mode: "signup",
+      message: "Reconciliation is available for registered users only. Read more about the reconciliation tool ",
+      link: { text: "here", url: "/reconcile-guide.html" },
+      suffix: ".",
+    },
+  })
+);
     setExporting(false);
     return;
   }

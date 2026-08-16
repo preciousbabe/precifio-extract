@@ -1,13 +1,29 @@
 import { createPortal } from 'react-dom';
 import { useAuth } from '../hooks/useAuth';
 import { Auth } from './Auth';
+import { useEffect } from 'react';
 
 export default function AuthModal() {
-  const { showAuthModal, setShowAuthModal, authModalMode, authModalMessage } = useAuth();
+  const { showAuthModal, setShowAuthModal, authModalMode, setAuthModalMode, authModalMessage } = useAuth();
 
   const resetToken = typeof window !== 'undefined'
     ? localStorage.getItem('precifio_reset_token')
     : null;
+
+  // ── NEW: Parse recovery token from URL hash when Supabase redirects back ──
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (hash && hash.includes('type=recovery')) {
+      const params = new URLSearchParams(hash.substring(1));
+      const accessToken = params.get('access_token');
+      if (accessToken) {
+        localStorage.setItem('precifio_reset_token', accessToken);
+        window.location.hash = ''; // clean the URL
+        setAuthModalMode('reset');
+        setShowAuthModal(true);
+      }
+    }
+  }, [setAuthModalMode, setShowAuthModal]);
 
   if (!showAuthModal) return null;
 

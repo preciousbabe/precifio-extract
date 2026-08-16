@@ -133,8 +133,6 @@ async function uploadWithPoll(url, file, onProgress, jobId = null) {
   throw new Error("Extraction failed after multiple attempts.");
 }
 
-// src/services/queueManager.js
-// ... existing code above stays the same ...
 
 class QueueManager {
   async process(file, options = {}) {
@@ -173,8 +171,7 @@ try {
     return result;
   }
 
-  // NEW: Recover a job without needing the file object.
-  // Called on mount for items stuck in "processing".
+ 
   async recoverJob(jobId, onProgress) {
     if (!jobId) return null;
     const recovered = await recoverExistingJob(jobId, onProgress);

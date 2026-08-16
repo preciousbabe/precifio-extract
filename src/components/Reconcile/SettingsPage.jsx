@@ -18,13 +18,11 @@ export default function SettingsPage() {
   const [aliases, setAliases] = useState([]);
   const [showAliasForm, setShowAliasForm] = useState(false);
 
-  // Alias form state
   const [editingId, setEditingId] = useState(null);
   const [canonicalName, setCanonicalName] = useState("");
   const [fieldType, setFieldType] = useState("text");
   const [aliasInput, setAliasInput] = useState("");
 
-  // Nuclear delete flow
   const [showNuclear, setShowNuclear] = useState(false);
   const [nuclearText, setNuclearText] = useState("");
 
@@ -110,7 +108,7 @@ export default function SettingsPage() {
     URL.revokeObjectURL(url);
   };
 
-    const handleNuclearDelete = async () => {
+  const handleNuclearDelete = async () => {
     if (nuclearText !== "DELETE") return;
     if (!window.confirm("This is irreversible. All workspaces, documents, matches, and aliases will be permanently removed.")) return;
     try {
@@ -125,7 +123,6 @@ export default function SettingsPage() {
     }
   };
 
-  
   const granted = !!consent?.consent_granted;
   const grantedDate = consent?.consent_granted_at
     ? new Date(consent.consent_granted_at).toLocaleString()
@@ -159,6 +156,18 @@ export default function SettingsPage() {
             ? `You enabled reconciliation on ${grantedDate}. Structured extracted data is stored for matching. Original files are never kept.`
             : "Reconciliation is currently disabled. Enable it to match documents across datasets."}
         </p>
+
+        <div style={{ marginBottom: "16px" }}>
+          <a
+            href="/reconcile-guide.html"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ fontSize: "13px", color: "#1e40af", fontWeight: 600, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: "6px" }}
+          >
+            📖 How Reconciliation Works — Full Guide
+            <span style={{ fontSize: "16px" }}>↗</span>
+          </a>
+        </div>
 
         <div style={{ display: "flex", gap: "10px" }}>
           {granted ? (

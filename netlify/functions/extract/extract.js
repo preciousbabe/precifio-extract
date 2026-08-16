@@ -219,7 +219,7 @@ exports.handler = async (event, context) => {
         } else {
           await supabase.from("guest_extractions").update({
             extraction_count: 1,
-            device_fingerprint: deviceFingerprint, // update in case it changed
+            device_fingerprint: deviceFingerprint, 
             device_id: deviceId !== "unknown" ? deviceId : guestRecord.device_id,
             last_used: new Date().toISOString(),
           }).eq("guest_id", guestId);

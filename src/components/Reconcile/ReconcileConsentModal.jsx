@@ -30,7 +30,7 @@ export default function ReconcileConsentModal({ onClose, onGranted }) {
     }
   };
 
-  if (hasConsent === null) return null; // still checking
+  if (hasConsent === null) return null; 
 
   const overlay = (
     <div

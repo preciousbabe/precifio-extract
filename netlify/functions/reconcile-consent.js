@@ -29,6 +29,8 @@ async function getUser(event) {
 }
 
 exports.handler = async (event, context) => {
+  context.callbackWaitsForEmptyEventLoop = false;
+
   if (event.httpMethod === "OPTIONS") return ok({});
 
   const auth = await getUser(event);
@@ -36,22 +38,35 @@ exports.handler = async (event, context) => {
   const userId = auth.user.id;
 
   if (event.httpMethod === "GET") {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("reconciliation_user_settings")
       .select("*")
       .eq("user_id", userId)
-      .single();
+      .maybeSingle();
+
+    if (error) return err(500, error.message);
     return ok({ consent_granted: !!data?.consent_granted, settings: data || null });
   }
 
   if (event.httpMethod === "POST") {
-    const body = JSON.parse(event.body || "{}");
+    let body = {};
+    try {
+      body = JSON.parse(event.body || "{}");
+    } catch {
+      return err(400, "Invalid JSON body");
+    }
+
     const { consent_granted, match_settings } = body;
+
+    if (match_settings && JSON.stringify(match_settings).length > 50000) {
+      return err(413, "match_settings too large");
+    }
 
     const payload = {
       user_id: userId,
       consent_granted: consent_granted === true,
       consent_granted_at: consent_granted === true ? new Date().toISOString() : null,
+      updated_at: new Date().toISOString(),
       ...(match_settings && { default_match_settings: match_settings }),
     };
 
@@ -59,10 +74,10 @@ exports.handler = async (event, context) => {
       .from("reconciliation_user_settings")
       .upsert(payload, { onConflict: "user_id" })
       .select()
-      .single();
+      .maybeSingle();
 
     if (error) return err(500, error.message);
-    return ok({ consent_granted: data.consent_granted, settings: data });
+    return ok({ consent_granted: data?.consent_granted ?? false, settings: data });
   }
 
   return err(405, "Method not allowed");

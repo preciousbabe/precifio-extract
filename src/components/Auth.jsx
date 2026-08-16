@@ -171,19 +171,32 @@ export function Auth({ initialMode = 'login', resetToken, featureMessage }) {
       <h2 style={{ textAlign: 'center', marginBottom: '24px' }}>Precifio Extract</h2>
 
       {featureMessage && (
-        <div style={{
-          marginBottom: '20px',
-          padding: '14px 16px',
-          background: '#eff6ff',
-          border: '1px solid #bfdbfe',
-          borderRadius: '8px',
-          color: '#1e40af',
-          fontSize: '14px',
-          lineHeight: 1.5
-        }}>
-          {featureMessage}
-        </div>
-      )}
+  <div style={{
+    marginBottom: '20px',
+    padding: '14px 16px',
+    background: '#eff6ff',
+    border: '1px solid #bfdbfe',
+    borderRadius: '8px',
+    color: '#1e40af',
+    fontSize: '14px',
+    lineHeight: 1.5
+  }}>
+    {typeof featureMessage === 'string' ? featureMessage : (
+      <>
+        {featureMessage.message}
+        <a
+          href={featureMessage.link?.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ color: '#1e40af', textDecoration: 'underline', fontWeight: 500 }}
+        >
+          {featureMessage.link?.text}
+        </a>
+        {featureMessage.suffix}
+      </>
+    )}
+  </div>
+)}
 
       {/* ── LOGIN ── */}
       {mode === 'login' && (

@@ -89,15 +89,26 @@ export function AuthProvider({ children }) {
   }, [fetchUser]);
 
 
-  useEffect(() => {
+ useEffect(() => {
   const handleShowModal = (e) => {
     setAuthModalMode(e.detail?.mode || 'login');
-    setAuthModalMessage(e.detail?.message || '');
+
+    if (e.detail?.link) {
+      setAuthModalMessage({
+        message: e.detail.message || '',
+        link: e.detail.link,
+        suffix: e.detail.suffix || '',
+      });
+    } else {
+      setAuthModalMessage(e.detail?.message || '');
+    }
+
     setShowAuthModal(true);
   };
   window.addEventListener('showAuthModal', handleShowModal);
   return () => window.removeEventListener('showAuthModal', handleShowModal);
 }, []);
+
 
   // Listen for storage changes (other tabs logging out)
   useEffect(() => {

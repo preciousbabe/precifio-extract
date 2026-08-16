@@ -99,11 +99,11 @@ exports.handler = async (event, context) => {
 
   try {
     const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-      email: normalizedEmail,
-      password,
-      email_confirm: false,
-      user_metadata: { full_name: fullName, company_name: normalizedCompany }
-    });
+  email: normalizedEmail,
+  password,
+  email_confirm: true, 
+  user_metadata: { full_name: fullName, company_name: normalizedCompany }
+  });
 
     if (authError) {
       // Supabase Auth duplicate email fallback
