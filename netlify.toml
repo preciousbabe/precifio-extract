@@ -7,9 +7,9 @@
   command = "vite"
   targetPort = 5173
   functions = "netlify/functions"
-  framework = "#custom"  
+  framework = "#custom"
 
-# ── STATIC PAGES (BEFORE the SPA catch-all) ──
+# ── STATIC PAGES (served before SPA catch-all) ──
 [[redirects]]
   from = "/terms"
   to = "/terms.html"
@@ -20,7 +20,7 @@
   to = "/privacy.html"
   status = 200
 
- [[redirects]]
+[[redirects]]
   from = "/reconcile-guide"
   to = "/reconcile-guide.html"
   status = 200
@@ -30,7 +30,8 @@
   to = "/support.html"
   status = 200
 
-# ── API FUNCTIONS ──
+# ── API PROXY ──
+# Frontend calls /api/paddle/... → Netlify serves the function
 [[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/:splat"
@@ -49,5 +50,3 @@
     Access-Control-Allow-Origin = "*"
     Access-Control-Allow-Methods = "GET, POST, OPTIONS"
     Access-Control-Allow-Headers = "Content-Type, Authorization"
-
-    

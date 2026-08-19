@@ -83,8 +83,14 @@ exports.handler = async (event, context) => {
       return response(500, { error: "Checkout creation failed" });
     }
 
+      const checkoutUrl = paddleData.data?.checkout?.url;
+    if (!checkoutUrl) {
+      console.error("Paddle response missing checkout.url:", JSON.stringify(paddleData, null, 2));
+      return response(500, { error: "Checkout URL not returned by Paddle" });
+    }
+
     return response(200, {
-      checkout_url: paddleData.data?.checkout?.url,
+      checkout_url: checkoutUrl,
       transaction_id: paddleData.data?.id,
     });
 

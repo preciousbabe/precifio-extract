@@ -6,6 +6,7 @@ const { PADDLE_PRICE_MAP } = require("./packages");
 const CORS = {
   "Access-Control-Allow-Origin": process.env.CORS_ORIGIN || "*",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  "Access-Control-Allow-Methods": "GET, OPTIONS",
   "Content-Type": "application/json",
 };
 

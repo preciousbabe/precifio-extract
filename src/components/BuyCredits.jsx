@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 
-const API_BASE = '/.netlify/functions';
+const API_BASE = '/api';
 
 export function BuyCredits({ session, onClose, onSuccess, alert }) {
   const [packages, setPackages] = useState([]);
