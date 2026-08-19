@@ -4,8 +4,16 @@ import { createPortal } from "react-dom";
 import { useReconciliation } from "../../hooks/useReconciliation";
 import InvestigativeReportPanel from "./InvestigativeReportPanel";
 import MatchConfigModal from "./MatchConfigModal";
-import { estimateReconciliationCost } from "../../utils/credit";
 import SettingsPage from "./SettingsPage";
+
+
+// Backend owns pricing — this is a non-authoritative UI estimate only
+function estimateReconciliationCost(docCountA, docCountB) {
+  const pairs = Math.min(docCountA || 0, docCountB || 0);
+  const engine = Math.min(1.0 + pairs * 0.15, 4.0);
+  return Math.max(0.3 + engine, 0.5);
+}
+
 
 async function parseSpreadsheet(file) {
   const name = file.name.toLowerCase();
