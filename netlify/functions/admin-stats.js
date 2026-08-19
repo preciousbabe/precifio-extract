@@ -1,3 +1,4 @@
+// netlify/functions/admin-stats.js
 const { createClient } = require('@supabase/supabase-js');
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
@@ -68,10 +69,10 @@ exports.handler = async (event, context) => {
       creditsInCirculation: cache?.credits_in_circulation || 0,
       avgPurchaseValue,
       documentTypeBreakdown: docTypes || [],
-      recentTransactions: (recentTx || []).map(t => ({
+        recentTransactions: (recentTx || []).map(t => ({
         email: emailMap[t.user_id] || 'unknown',
         package: t.metadata?.package_id || 'unknown',
-        amount: t.amount * 100,
+        amount: t.metadata?.amount_paid ? parseInt(t.metadata.amount_paid, 10) : 0,
         created_at: t.created_at
       }))
     })

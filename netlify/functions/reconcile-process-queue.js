@@ -1,6 +1,11 @@
 // netlify/functions/reconcile-process-queue.js
 const { createClient } = require("@supabase/supabase-js");
-const { calculateReconciliationCost, getUserCredits, deductCredits } = require("./lib/credits");
+const {
+  calculateReconciliationCost,
+  estimateReconciliationCost,
+  getUserCredits,
+  deductCredits,
+} = require("./lib/credit");
 const core = require("./lib/reconcile-core");
 
 const supabase = createClient(
@@ -169,7 +174,7 @@ exports.handler = async (event, context) => {
     // ─── CREDIT CHECK ─────────────────────────────────────────────────────
     const sideACount = normalizedSideA.length;
     const sideBCount = normalizedSideB.length;
-    const estimatedCost = calculateReconciliationCost(sideACount, sideBCount, 0);
+    const estimatedCost = estimateReconciliationCost(sideACount, sideBCount);
     const userBalance = await getUserCredits(supabase, userId);
 
     if (userBalance < estimatedCost) {
@@ -203,15 +208,21 @@ exports.handler = async (event, context) => {
       () => {} // silent logger for queue
     );
 
-    // Optional OpenAI narrative enhancement
+        // Optional OpenAI narrative enhancement
     const openaiKey = process.env.OPENAI_API_KEY;
+    let aiInputTokens = 0;
+    let aiOutputTokens = 0;
     if (openaiKey) {
       for (const m of matches) {
         if (m.investigative_report) {
-          m.investigative_report = await core.enhanceReportWithOpenAI(m.investigative_report, openaiKey);
+          const result = await core.enhanceReportWithOpenAI(m.investigative_report, openaiKey);
+          m.investigative_report = result.report;
+          aiInputTokens += result.usage?.prompt_tokens || 0;
+          aiOutputTokens += result.usage?.completion_tokens || 0;
         }
       }
     }
+
 
     // Write matches
     const docAMap = new Map(normalizedSideA.map(d => [d.id, d]));
@@ -281,14 +292,20 @@ exports.handler = async (event, context) => {
     };
 
         // ─── DEDUCT ACTUAL CREDITS ────────────────────────────────────────────
-    const actualCost = calculateReconciliationCost(sideACount, sideBCount, matches.length);
-    const deduction = await deductCredits(supabase, userId, actualCost, "reconciliation", runRecord.id, {
+    const actualCost = calculateReconciliationCost({
+    aiInputTokens: 0,
+    aiOutputTokens: 0,
+    docCountA: sideACount,
+    docCountB: sideBCount,
+   });
+           const deduction = await deductCredits(supabase, userId, actualCost, "reconciliation", runRecord.id, {
       workspace_id,
       side_a_count: sideACount,
       side_b_count: sideBCount,
       match_count: matches.length,
+      tokens_used: { input: aiInputTokens, output: aiOutputTokens, model: "gpt-4o-mini" },
     });
-
+    
     if (!deduction.success) {
       console.warn("Queued run credit deduction failed:", deduction.error);
     }

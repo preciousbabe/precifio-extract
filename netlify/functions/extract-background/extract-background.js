@@ -4,33 +4,9 @@ const { extractTextFromFile } = require("../services/extractor-service");
 const { cleanOCR } = require("../utils/clean-ocr");
 const AIClient = require("../utils/ai-client");
 const { createClient } = require("@supabase/supabase-js");
-const { deductCredits } = require("../lib/credits");
+const { calculateExtractionCost, deductCredits } = require("../lib/credit");
 const crypto = require("crypto");
 
-function estimateCreditCost(text, fileName = "") {
-  const wordCount = text.split(/\s+/).filter((w) => w.length > 0).length;
-  let estimated = Math.max(0.5, wordCount / 400);
-  const lowerName = fileName.toLowerCase();
-  if (/bank|statement/.test(lowerName)) estimated *= 2.5;
-  else if (/invoice|bill/.test(lowerName)) estimated *= 1.2;
-  else if (/receipt/.test(lowerName)) estimated *= 0.8;
-  const charCount = text.length;
-  const numberDensity = charCount > 0 ? (text.match(/\d/g) || []).length / charCount : 0;
-  if (numberDensity > 0.15) estimated *= 1.3;
-  return Math.ceil(estimated * 2) / 2;
-}
-
-function calculateActualCost(documentType, textLength = 0) {
-  const rates = {
-    receipt: 0.7, invoice: 1.2, purchase_order: 1.6,
-    bank_statement: 4.8, insurance_claim: 7.2,
-    medical_report: 8.5, passport: 0.9, drivers_license: 0.8,
-    generic: 1.0
-  };
-  const rate = rates[documentType] || rates.generic;
-  const tokenCost = (textLength / 4 / 1000) * 0.5;
-  return Math.round(Math.max(rate, Math.min(tokenCost, rate * 1.5)) * 10) / 10;
-}
 
 function applyCorrections(extractedData, corrections) {
   if (!extractedData.segments) return extractedData;
@@ -192,12 +168,21 @@ exports.handler = async (event, context) => {
     let docType = "generic";
     let actualCost = cost;
 
+        let usage = null;
     try {
       const aiClient = new AIClient();
-      extractedData = await aiClient.extract(cleanedText);
+      // REQUIREMENT: your AIClient.extract() must now return { data, usage }
+      // usage = { prompt_tokens, completion_tokens, total_tokens, model }
+      const aiResult = await aiClient.extract(cleanedText);
+      extractedData = aiResult.data;
+      usage = aiResult.usage || {};
 
       docType = (extractedData.document_type || extractedData.category || "generic").toString().toLowerCase().trim();
-      actualCost = calculateActualCost(docType, cleanedText.length);
+      actualCost = calculateExtractionCost({
+        inputTokens: usage.prompt_tokens || 0,
+        outputTokens: usage.completion_tokens || 0,
+        model: usage.model || config?.ai?.provider || "default",
+      });
 
     } catch (aiError) {
       await supabase.from("extractions").update({
@@ -277,7 +262,7 @@ exports.handler = async (event, context) => {
     let newBalance = null;
     if (!isGuest && userId) {
       try {
-        const deduction = await deductCredits(
+                const deduction = await deductCredits(
           supabase,
           userId,
           actualCost,
@@ -285,11 +270,12 @@ exports.handler = async (event, context) => {
           extractionId,
           {
             file_name: job.file_name,
-            estimated_cost: cost,
+            estimated_cost: cost, 
             document_type: docType,
             words: cleanedText.split(/\s+/).filter((w) => w.length > 0).length,
             chars: cleanedText.length,
-            model: config?.ai?.provider || "unknown",
+            model: usage?.model || config?.ai?.provider || "unknown",
+            tokens_used: usage, 
           }
         );
         if (deduction.success) {

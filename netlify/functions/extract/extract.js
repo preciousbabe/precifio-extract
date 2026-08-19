@@ -3,6 +3,7 @@ const config = require("../../../config");
 const { validateUpload } = require("../utils/validate-upload");
 const { createClient } = require("@supabase/supabase-js");
 const parseMultipartLib = require("parse-multipart");
+const { estimateExtractionCost } = require("../lib/credit");
 const crypto = require("crypto");
 
 function parseMultipart(event) {
@@ -39,18 +40,6 @@ function getRequestedJobId(event) {
   return event.headers?.["x-extraction-job-id"] || event.headers?.["X-Extraction-Job-Id"] || event.queryStringParameters?.jobId || null;
 }
 
-function estimateCreditCost(text, fileName = "") {
-  const wordCount = text.split(/\s+/).filter((w) => w.length > 0).length;
-  let estimated = Math.max(0.5, wordCount / 400);
-  const lowerName = fileName.toLowerCase();
-  if (/bank|statement/.test(lowerName)) estimated *= 2.5;
-  else if (/invoice|bill/.test(lowerName)) estimated *= 1.2;
-  else if (/receipt/.test(lowerName)) estimated *= 0.8;
-  const charCount = text.length;
-  const numberDensity = charCount > 0 ? (text.match(/\d/g) || []).length / charCount : 0;
-  if (numberDensity > 0.15) estimated *= 1.3;
-  return Math.ceil(estimated * 2) / 2;
-}
 
 exports.handler = async (event, context) => {
   context.callbackWaitsForEmptyEventLoop = false;
@@ -379,7 +368,9 @@ exports.handler = async (event, context) => {
     if (uploadError) throw new Error(`Failed to stage file: ${uploadError.message}`);
 
     // ── Upsert DB record ──
-    const estimatedCost = estimateCreditCost(file.buffer.toString("utf8").slice(0, 5000), file.name);
+        const sampleText = file.buffer.toString("utf8").slice(0, 5000);
+    const wordCount = sampleText.split(/\s+/).filter((w) => w.length > 0).length;
+    const estimatedCost = estimateExtractionCost(wordCount);
     const jobPayload = {
       id: extractionId,
       idempotency_key: idempotencyKey,

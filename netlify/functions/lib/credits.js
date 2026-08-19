@@ -1,28 +1,105 @@
-// ── SHARED CREDIT HELPERS (CommonJS) ──────────────────
+// netlify/functions/lib/credit.js
+// ── UNIFIED TOKEN-BASED CREDIT ENGINE ──────────────────
 
-const RECONCILIATION_RATES = {
-  per_document: 0.15,
-  per_match:    0.10,
-  base:         0.50,
-  min_charge:   0.50,
-  max_charge:   25.00,
+// 1 Precifio Credit = $0.10 USD
+const CREDIT_USD_VALUE = 0.10;
+
+// AI model pricing: USD per 1M tokens (UPDATE THESE TO YOUR ACTUAL PROVIDER)
+const MODEL_PRICING = {
+  "gpt-4o":       { input: 2.50,  output: 10.00 },
+  "gpt-4o-mini":  { input: 0.15,  output: 0.60  },
+  "claude-sonnet":{ input: 3.00,  output: 15.00 },
+  "default":      { input: 2.50,  output: 10.00 },
 };
 
-function calculateReconciliationCost(sideACount, sideBCount, matchCount = 0) {
-  const r = RECONCILIATION_RATES;
-  const docCost = (sideACount + sideBCount) * r.per_document;
-  const matchCost = matchCount * r.per_match;
-  const total = r.base + docCost + matchCost;
-  return Math.min(Math.max(Math.round(total * 10) / 10, r.min_charge), r.max_charge);
+// Infrastructure amortized per-request (Netlify + Supabase + Resend)
+// Tweak this number once you know your real monthly bill.
+// Current guess: ~$64/mo @ 2,000 requests = $0.032/request ≈ 0.3 credits
+const INFRA_FEE_CREDITS = 0.3;
+
+// Your JS reconciliation engine fee (you deserve credit for your logic)
+const RECONCILIATION_ENGINE = {
+  baseCredits: 1.0,      // flat fee per reconciliation run
+  perDocPairCredits: 0.15,
+  maxEngineCredits: 4.0,
+};
+
+const MIN_CHARGE_CREDITS = 0.5;
+
+// ── HELPERS ───────────────────────────────────────────
+
+function getModelPricing(model = "default") {
+  return MODEL_PRICING[model] || MODEL_PRICING.default;
 }
 
-function estimateReconciliationCost(sideACount, sideBCount) {
-  const r = RECONCILIATION_RATES;
-  const docCost = (sideACount + sideBCount) * r.per_document;
-  const estimated = r.base + docCost;
-  return Math.min(Math.max(Math.round(estimated * 10) / 10, r.min_charge), r.max_charge);
+function usdToCredits(usd) {
+  return Math.ceil((usd / CREDIT_USD_VALUE) * 10) / 10;
 }
 
+function creditsToUsd(credits) {
+  return credits * CREDIT_USD_VALUE;
+}
+
+// Raw AI cost in USD (zero-margin)
+function calculateAICost(inputTokens, outputTokens, model = "default") {
+  const rates = getModelPricing(model);
+  const inputCost = (inputTokens / 1_000_000) * rates.input;
+  const outputCost = (outputTokens / 1_000_000) * rates.output;
+  return inputCost + outputCost;
+}
+
+// Apply 60% margin: cost is 40% of final price
+function applyMargin(costUsd) {
+  return costUsd / 0.4;
+}
+
+// ── EXTRACTION ────────────────────────────────────────
+function calculateExtractionCost({ inputTokens, outputTokens, model }) {
+  const aiCostUsd = calculateAICost(inputTokens, outputTokens, model);
+  const pricedUsd = applyMargin(aiCostUsd);
+  const totalCredits = usdToCredits(pricedUsd) + INFRA_FEE_CREDITS;
+  return Math.max(totalCredits, MIN_CHARGE_CREDITS);
+}
+
+function estimateExtractionCost(wordCount = 0, model = "default") {
+  // Rough: 1 word ≈ 1.3 tokens input, output ≈ 25% of input
+  const estInput = Math.ceil(wordCount * 1.3);
+  const estOutput = Math.ceil(estInput * 0.25);
+  return calculateExtractionCost({ inputTokens: estInput, outputTokens: estOutput, model });
+}
+
+// ── RECONCILIATION ────────────────────────────────────
+function calculateReconciliationCost({
+  aiInputTokens = 0,
+  aiOutputTokens = 0,
+  model = "default",
+  docCountA = 0,
+  docCountB = 0,
+}) {
+  const aiCostUsd = calculateAICost(aiInputTokens, aiOutputTokens, model);
+  const pricedAiUsd = applyMargin(aiCostUsd);
+
+  const pairs = Math.min(docCountA, docCountB);
+  const engineCredits = Math.min(
+    RECONCILIATION_ENGINE.baseCredits + (pairs * RECONCILIATION_ENGINE.perDocPairCredits),
+    RECONCILIATION_ENGINE.maxEngineCredits
+  );
+
+  const totalCredits = usdToCredits(pricedAiUsd) + INFRA_FEE_CREDITS + engineCredits;
+  return Math.max(totalCredits, MIN_CHARGE_CREDITS);
+}
+
+function estimateReconciliationCost(docCountA = 0, docCountB = 0) {
+  const pairs = Math.min(docCountA, docCountB);
+  const engineCredits = Math.min(
+    RECONCILIATION_ENGINE.baseCredits + (pairs * RECONCILIATION_ENGINE.perDocPairCredits),
+    RECONCILIATION_ENGINE.maxEngineCredits
+  );
+  return Math.max(INFRA_FEE_CREDITS + engineCredits, MIN_CHARGE_CREDITS);
+}
+
+
+// ── EXISTING: Wallet ops ──────────────────────────────
 async function getUserCredits(supabase, userId) {
   const { data, error } = await supabase
     .from("profiles")
@@ -55,37 +132,37 @@ async function deductCredits(supabase, userId, amount, feature, referenceId, met
 
   const { error: upErr } = await supabase
     .from("profiles")
-    .update({
-      credits_remaining: newBalance,
-      updated_at: new Date().toISOString(),
-    })
+    .update({ credits_remaining: newBalance, updated_at: new Date().toISOString() })
     .eq("id", userId);
 
-  if (upErr) {
-    return { success: false, error: upErr.message };
-  }
+  if (upErr) return { success: false, error: upErr.message };
 
   const { error: txErr } = await supabase.from("credit_transactions").insert({
     user_id: userId,
     amount: -amount,
     type: "debit",
-    feature: feature,
+    feature: feature,        // "extraction" or "reconciliation"
     reference_id: referenceId,
     balance_after: newBalance,
     metadata: metadata,
     status: "completed",
   });
 
-  if (txErr) {
-    console.warn(`[${feature}] Transaction log failed:`, txErr);
-  }
+  if (txErr) console.warn(`[${feature}] Transaction log failed:`, txErr);
 
   return { success: true, balance: newBalance };
 }
 
 module.exports = {
-  RECONCILIATION_RATES,
+  CREDIT_USD_VALUE,
+  MODEL_PRICING,
+  INFRA_FEE_CREDITS,
+  RECONCILIATION_ENGINE,
+  MIN_CHARGE_CREDITS,
+  calculateAICost,
+  calculateExtractionCost,
   calculateReconciliationCost,
+  estimateExtractionCost,
   estimateReconciliationCost,
   getUserCredits,
   deductCredits,

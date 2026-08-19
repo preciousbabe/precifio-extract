@@ -1,54 +1,22 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 const API_BASE = '/.netlify/functions';
 
-// AI Credit Packages — USD, volume bonuses, no page references
-const CREDIT_PACKAGES = [
-  { 
-    id: 'starter',    
-    credits: 100,  
-    price: 1000,   // $10.00
-    label: 'Starter',    
-    description: '100 AI Credits',
-    subtext: 'Perfect for getting started',
-    pricePerCredit: '$0.10 per credit',  
-    popular: false 
-  },
-  { 
-    id: 'growth',     
-    credits: 275,  
-    price: 2500,   // $25.00
-    label: 'Growth ⭐',     
-    description: '275 AI Credits',
-    subtext: '10% Bonus — Most Popular',
-    pricePerCredit: '$0.09 per credit',  
-    popular: true  
-  },
-  { 
-    id: 'business',   
-    credits: 600,  
-    price: 5000,   // $50.00
-    label: 'Business',   
-    description: '600 AI Credits',
-    subtext: '20% Bonus — Ideal for teams',
-    pricePerCredit: '$0.08 per credit',  
-    popular: false 
-  },
-  { 
-    id: 'enterprise', 
-    credits: 1300, 
-    price: 10000,  // $100.00
-    label: 'Enterprise', 
-    description: '1,300 AI Credits',
-    subtext: '30% Bonus — Best value',
-    pricePerCredit: '$0.07 per credit',  
-    popular: false 
-  },
-];
-
 export function BuyCredits({ session, onClose, onSuccess, alert }) {
+  const [packages, setPackages] = useState([]);
   const [loadingPkg, setLoadingPkg] = useState(null);
   const [error, setError] = useState(null);
+  const [fetching, setFetching] = useState(true);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/paddle/list-packages`)
+      .then(r => r.json())
+      .then(data => {
+        setPackages(data.packages || []);
+        setFetching(false);
+      })
+      .catch(() => setFetching(false));
+  }, []);
 
   const handlePurchase = async (pkg) => {
     setLoadingPkg(pkg.id);
@@ -58,30 +26,27 @@ export function BuyCredits({ session, onClose, onSuccess, alert }) {
       const token = session?.access_token || localStorage.getItem('precifio_token');
       if (!token) throw new Error('Please sign in to purchase credits');
 
-      const response = await fetch(`${API_BASE}/paystack-initiate`, {
+      const response = await fetch(`${API_BASE}/paddle/checkout`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({
-          user_id: session?.user?.id,
-          email: session?.user?.email,
-          amount: pkg.price,
-          credit_amount: pkg.credits,
-          package_id: pkg.id
-        })
+        body: JSON.stringify({ package_id: pkg.id })
       });
 
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Payment initialization failed');
+      if (!response.ok) throw new Error(data.error || 'Checkout initialization failed');
 
-      window.location.href = data.authorization_url;
+      // Redirect to Paddle checkout — zero frontend payment authority
+      window.location.href = data.checkout_url;
     } catch (err) {
       setError(err.message);
       setLoadingPkg(null);
     }
   };
+
+  const formatPrice = (cents) => `$${(cents / 100).toFixed(0)}`;
 
   return (
     <div style={{
@@ -111,22 +76,22 @@ export function BuyCredits({ session, onClose, onSuccess, alert }) {
         </div>
 
         <p style={{ color: '#64748b', marginBottom: '24px', fontSize: '14px', lineHeight: 1.5 }}>
-          AI Credits power every document processing task inside Precifio. 
+          AI Credits power every document processing task inside Precifio.
           Only successful processing consumes credits.
         </p>
 
         {alert && (
-          <div style={{ 
-            padding: '14px 16px', 
-            background: '#fee2e2', 
-            borderRadius: '10px', 
-            color: '#991b1b', 
+          <div style={{
+            padding: '14px 16px',
+            background: '#fee2e2',
+            borderRadius: '10px',
+            color: '#991b1b',
             marginBottom: '20px',
             fontSize: '14px',
             border: '1px solid #fca5a5'
           }}>
             <strong>Not enough credits.</strong><br/>
-            "{alert.fileName}" needs approximately <strong>{alert.required} credit{alert.required > 1 ? 's' : ''}</strong>. 
+            "{alert.fileName}" needs approximately <strong>{alert.required} credit{alert.required > 1 ? 's' : ''}</strong>.
             You have {alert.available}. Top up to continue.
           </div>
         )}
@@ -137,75 +102,76 @@ export function BuyCredits({ session, onClose, onSuccess, alert }) {
           </div>
         )}
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {CREDIT_PACKAGES.map(pkg => (
-            <div
-              key={pkg.id}
-              onClick={() => !loadingPkg && handlePurchase(pkg)}
-              style={{
-                padding: '20px',
-                border: pkg.popular ? '2px solid #10b981' : '1px solid #e2e8f0',
-                borderRadius: '12px',
-                cursor: loadingPkg ? 'not-allowed' : 'pointer',
-                opacity: loadingPkg && loadingPkg !== pkg.id ? 0.5 : 1,
-                position: 'relative',
-                background: pkg.popular ? '#f0fdf4' : '#fff',
-                transition: 'all 0.2s'
-              }}
-            >
-              {pkg.popular && (
-                <span style={{
-                  position: 'absolute',
-                  top: '-10px',
-                  right: '16px',
-                  background: '#10b981',
-                  color: '#fff',
-                  padding: '4px 12px',
+        {fetching ? (
+          <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>Loading packages...</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {packages.map(pkg => (
+              <div
+                key={pkg.id}
+                onClick={() => !loadingPkg && handlePurchase(pkg)}
+                style={{
+                  padding: '20px',
+                  border: pkg.popular ? '2px solid #10b981' : '1px solid #e2e8f0',
                   borderRadius: '12px',
-                  fontSize: '11px',
-                  fontWeight: 600
-                }}>
-                  MOST POPULAR
-                </span>
-              )}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <div style={{ fontSize: '17px', fontWeight: 700, color: '#0f172a' }}>{pkg.label}</div>
-                  <div style={{ fontSize: '14px', color: '#334155', marginTop: '4px', fontWeight: 600 }}>
-                    {pkg.description}
-                  </div>
-                  <div style={{ fontSize: '12px', color: '#059669', marginTop: '2px', fontWeight: 500 }}>
-                    {pkg.subtext}
-                  </div>
-                  <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
-                    {pkg.pricePerCredit}
-                  </div>
-                  <div style={{ fontSize: '24px', fontWeight: 700, color: '#1e40af', marginTop: '8px' }}>
-                    ${(pkg.price / 100).toFixed(0)}
-                    <span style={{ fontSize: '13px', fontWeight: 400, color: '#64748b' }}> USD</span>
-                  </div>
-                </div>
-                <button 
-                  disabled={loadingPkg === pkg.id}
-                  style={{
-                    padding: '10px 24px',
-                    background: pkg.popular ? '#10b981' : '#1e40af',
+                  cursor: loadingPkg ? 'not-allowed' : 'pointer',
+                  opacity: loadingPkg && loadingPkg !== pkg.id ? 0.5 : 1,
+                  position: 'relative',
+                  background: pkg.popular ? '#f0fdf4' : '#fff',
+                  transition: 'all 0.2s'
+                }}
+              >
+                {pkg.popular && (
+                  <span style={{
+                    position: 'absolute',
+                    top: '-10px',
+                    right: '16px',
+                    background: '#10b981',
                     color: '#fff',
-                    border: 'none',
-                    borderRadius: '8px',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    fontSize: '14px',
-                    opacity: loadingPkg === pkg.id ? 0.7 : 1,
-                    whiteSpace: 'nowrap'
-                  }}
-                >
-                  {loadingPkg === pkg.id ? '...' : 'Buy'}
-                </button>
+                    padding: '4px 12px',
+                    borderRadius: '12px',
+                    fontSize: '11px',
+                    fontWeight: 600
+                  }}>
+                    MOST POPULAR
+                  </span>
+                )}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontSize: '17px', fontWeight: 700, color: '#0f172a' }}>{pkg.label}</div>
+                    <div style={{ fontSize: '14px', color: '#334155', marginTop: '4px', fontWeight: 600 }}>
+                      {pkg.credits} AI Credits
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
+                      ${(pkg.priceCents / 100 / pkg.credits).toFixed(2)} per credit
+                    </div>
+                    <div style={{ fontSize: '24px', fontWeight: 700, color: '#1e40af', marginTop: '8px' }}>
+                      {formatPrice(pkg.priceCents)}
+                      <span style={{ fontSize: '13px', fontWeight: 400, color: '#64748b' }}> USD</span>
+                    </div>
+                  </div>
+                  <button
+                    disabled={loadingPkg === pkg.id}
+                    style={{
+                      padding: '10px 24px',
+                      background: pkg.popular ? '#10b981' : '#1e40af',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      fontSize: '14px',
+                      opacity: loadingPkg === pkg.id ? 0.7 : 1,
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    {loadingPkg === pkg.id ? '...' : 'Buy'}
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
 
         <div style={{ marginTop: '20px', padding: '14px', background: '#f8fafc', borderRadius: '10px' }}>
           <div style={{ fontSize: '12px', color: '#475569', lineHeight: 1.6 }}>
@@ -219,13 +185,13 @@ export function BuyCredits({ session, onClose, onSuccess, alert }) {
               <span style={{ color: '#10b981' }}>✓</span> Instant top-up
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ color: '#10b981' }}>✓</span> Secure payment
+              <span style={{ color: '#10b981' }}>✓</span> Secure payment via Paddle
             </div>
           </div>
         </div>
 
         <p style={{ fontSize: '12px', color: '#94a3b8', marginTop: '16px', textAlign: 'center' }}>
-          Secured by Paystack • Instant delivery • No charge for failed extractions
+          Secured by Paddle • Instant delivery • No charge for failed extractions
         </p>
       </div>
     </div>

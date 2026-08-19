@@ -884,14 +884,23 @@ async function enhanceReportWithOpenAI(report, openaiApiKey) {
         max_tokens: 250
       })
     });
-    const data = await response.json();
+       const data = await response.json();
     if (data.choices?.[0]?.message?.content) {
       report.openai_narrative = data.choices[0].message.content.trim();
     }
+
+    const usage = {
+      prompt_tokens: data.usage?.prompt_tokens || 0,
+      completion_tokens: data.usage?.completion_tokens || 0,
+      total_tokens: data.usage?.total_tokens || 0,
+      model: "gpt-4o-mini",
+    };
+
+    return { report, usage };
   } catch (e) {
     // Optional enhancement — fail silently
+    return { report, usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, model: "gpt-4o-mini" } };
   }
-  return report;
 }
 
 function findSubsetSum(items, target, tolAbs, amountField, rules, targetDoc, targetSide = "B", strictRef = false, log = () => {}) {

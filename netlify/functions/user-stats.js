@@ -1,3 +1,4 @@
+// netlify/functions/user-stats.js
 const { createClient } = require('@supabase/supabase-js');
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
@@ -26,12 +27,12 @@ exports.handler = async (event, context) => {
     .eq('user_id', user.id)
     .gte('created_at', thirtyDaysAgo);
 
-  const creditsUsed = transactions?.filter(t => t.type === 'extraction' && t.amount < 0)
+    const creditsUsed = transactions?.filter(t => t.type === 'debit' && t.amount < 0)
     .reduce((sum, t) => sum + Math.abs(t.amount), 0) || 0;
 
-  const documentsProcessed = transactions?.filter(t => t.type === 'extraction').length || 0;
-  const timeSaved = Math.round(documentsProcessed * 4 / 60 * 10) / 10; // 4 min/doc
-  const moneySaved = Math.round(timeSaved * 50); // $50/hr
+  const documentsProcessed = transactions?.filter(t => t.feature === 'extraction' && t.type === 'debit').length || 0;
+  const timeSaved = Math.round(documentsProcessed * 4 / 60 * 10) / 10; 
+  const moneySaved = Math.round(timeSaved * 50); 
 
   return {
     statusCode: 200,

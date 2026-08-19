@@ -53,9 +53,17 @@ class AIClient {
 
     console.log("✅ OpenAI request succeeded");
 
-    return this._parseResponse(
-      response.choices[0].message.content
-    );
+        const data = this._parseResponse(response.choices[0].message.content);
+
+    return {
+      data,
+      usage: {
+        prompt_tokens: response.usage?.prompt_tokens || 0,
+        completion_tokens: response.usage?.completion_tokens || 0,
+        total_tokens: response.usage?.total_tokens || 0,
+        model: config.ai.openai.model || "unknown",
+      }
+    };
 
   } catch (err) {
 
