@@ -1,7 +1,7 @@
 // netlify/functions/paddle/list-packages.js
 "use strict";
 
-const { PADDLE_PRICE_MAP } = require("./packages");
+const { PADDLE_PRICE_MAP } = require("./paddle/packages");
 
 const CORS = {
   "Access-Control-Allow-Origin": process.env.CORS_ORIGIN || "*",

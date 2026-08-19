@@ -32,20 +32,19 @@
 
 [[redirects]]
   from = "/api/paddle/list-packages"
-  to = "/.netlify/functions/paddle/list-packages"
+  to = "/.netlify/functions/paddle-list-packages"
   status = 200
 
 [[redirects]]
   from = "/api/paddle/checkout"
-  to = "/.netlify/functions/paddle/checkout"
+  to = "/.netlify/functions/paddle-checkout"
   status = 200
 
 [[redirects]]
   from = "/api/paddle/webhook"
-  to = "/.netlify/functions/paddle/webhook"
+  to = "/.netlify/functions/paddle-webhook"
   status = 200
 
-  
 # ── SPA CATCH-ALL (MUST BE LAST) ──
 [[redirects]]
   from = "/*"

@@ -18,9 +18,9 @@
  * ============================================================
  */
 
-const { getSupabaseAdmin } = require("./supabase");
-const { getPackageById } = require("./packages");
-const { PADDLE_API_BASE_URL } = require("./config");
+const { getSupabaseAdmin } = require("./paddle/supabase");
+const { getPackageById } = require("./paddle/packages");
+const { PADDLE_API_BASE_URL } = require("./paddle/config");
 
 const CORS = {
   "Access-Control-Allow-Origin": process.env.CORS_ORIGIN || "*",

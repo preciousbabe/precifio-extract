@@ -36,11 +36,11 @@
 
 const {
   verifyPaddleWebhook,
-} = require("./verify");
+} = require("./paddle/verify");
 
 const {
   fulfillPaddlePurchase,
-} = require("./fulfill");
+} = require("./paddle/fulfill");
 
 
 /* ============================================================
