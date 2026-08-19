@@ -4,7 +4,7 @@
  * ============================================================
  * PRECIFIO — PADDLE PURCHASE FULFILLMENT
  * ============================================================
- *
+ * netlify/functions/paddle/fulfil.js
  * This module is the ONLY place responsible for turning a
  * verified Paddle purchase into Precifio credits.
  *

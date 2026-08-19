@@ -1,3 +1,5 @@
+// src/components/buyCredit.jsx
+
 import { useState, useEffect } from 'react';
 
 const API_BASE = '/.netlify/functions';
@@ -9,14 +11,23 @@ export function BuyCredits({ session, onClose, onSuccess, alert }) {
   const [fetching, setFetching] = useState(true);
 
   useEffect(() => {
-    fetch(`${API_BASE}/paddle/list-packages`)
-      .then(r => r.json())
-      .then(data => {
-        setPackages(data.packages || []);
-        setFetching(false);
-      })
-      .catch(() => setFetching(false));
-  }, []);
+  fetch(`${API_BASE}/paddle/list-packages`)
+    .then(async (r) => {
+      if (!r.ok) {
+        const text = await r.text();
+        throw new Error(`Server ${r.status}: ${text.slice(0, 200)}`);
+      }
+      return r.json();
+    })
+    .then((data) => {
+      setPackages(data.packages || []);
+      setFetching(false);
+    })
+    .catch((err) => {
+      setError(`Failed to load packages: ${err.message}`);
+      setFetching(false);
+    });
+}, []);
 
   const handlePurchase = async (pkg) => {
     setLoadingPkg(pkg.id);

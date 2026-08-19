@@ -4,7 +4,7 @@
  * ============================================================
  * PRECIFIO — PADDLE WEBHOOK VERIFICATION
  * ============================================================
- *
+ *netlify/functions/paddle/verify.js
  * This module verifies that a webhook genuinely came from
  * Paddle before Precifio performs ANY credit operation.
  *

@@ -4,7 +4,7 @@
  * ============================================================
  * PRECIFIO — SUPABASE SERVER CLIENT
  * ============================================================
- *
+ *netlify/functons/paddle/supabase.js
  * Backend-only Supabase client.
  *
  * Uses the Supabase service-role key.

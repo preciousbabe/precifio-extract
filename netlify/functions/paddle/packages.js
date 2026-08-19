@@ -1,3 +1,5 @@
+// netlify/functions/paddle/packages.js
+
 "use strict";
 
 /**
