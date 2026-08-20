@@ -1,7 +1,5 @@
-// netlify/functions/paddle-checkout.js
 "use strict";
 
-const { Paddle, Environment } = require("@paddle/paddle-node-sdk");
 const { getSupabaseAdmin } = require("./paddle/supabase");
 const { getPackageById } = require("./paddle/packages");
 
@@ -17,25 +15,6 @@ function response(statusCode, body) {
     headers: { ...CORS, "Content-Type": "application/json" },
     body: JSON.stringify(body),
   };
-}
-
-let paddleClient = null;
-
-function getPaddle() {
-  if (paddleClient) return paddleClient;
-
-  const apiKey = process.env.PADDLE_API_KEY;
-  if (!apiKey) throw new Error("PADDLE_API_KEY is not configured.");
-
-  const isProduction =
-    String(process.env.PADDLE_ENVIRONMENT || "sandbox").trim().toLowerCase() ===
-    "production";
-
-  paddleClient = new Paddle(apiKey, {
-    environment: isProduction ? Environment.production : Environment.sandbox,
-  });
-
-  return paddleClient;
 }
 
 exports.handler = async (event, context) => {
@@ -65,35 +44,15 @@ exports.handler = async (event, context) => {
     const pkg = getPackageById(packageId);
     if (!pkg) return response(400, { error: "Invalid package" });
 
-    // ── Create Paddle transaction via SDK ──
-    const paddle = getPaddle();
-
-    const transaction = await paddle.transactions.create({
-      items: [{ priceId: pkg.priceId, quantity: 1 }],
-      customer: { email: user.email },
-      customData: {
-        user_id: user.id,
-        package_id: pkg.packageId,
-      },
-    });
-
-    console.log("Paddle transaction created:", JSON.stringify(transaction, null, 2));
-
-    const checkoutUrl = transaction.checkout?.url;
-    const transactionId = transaction.id;
-
-    if (!checkoutUrl || !transactionId) {
-      console.error("Paddle response missing checkout data:", JSON.stringify(transaction, null, 2));
-      return response(500, { error: "Checkout data not returned by Paddle" });
-    }
-
+    // ── Return validated price for client-side checkout ──
     return response(200, {
-      transaction_id: transactionId,
-      checkout_url: checkoutUrl,   // e.g., https://extract.precifio.app?_ptxn=txn_...
+      price_id: pkg.priceId,
+      package_id: pkg.packageId,
+      user_email: user.email,
     });
 
   } catch (err) {
     console.error("Checkout error:", err);
-    return response(500, { error: err.message || "Checkout creation failed" });
+    return response(500, { error: err.message || "Checkout initialization failed" });
   }
 };

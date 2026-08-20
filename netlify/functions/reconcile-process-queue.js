@@ -5,7 +5,7 @@ const {
   estimateReconciliationCost,
   getUserCredits,
   deductCredits,
-} = require("./lib/credit");
+} = require("./lib/credits");
 const core = require("./lib/reconcile-core");
 
 const supabase = createClient(

@@ -1,4 +1,3 @@
-// src/hooks/usePaddle.js
 import { useEffect, useRef, useState, useCallback } from 'react';
 
 const PADDLE_ENV = import.meta.env.VITE_PADDLE_ENVIRONMENT || 'sandbox';
@@ -9,13 +8,11 @@ export function usePaddle() {
   const paddleRef = useRef(null);
 
   useEffect(() => {
-    // Already loaded
     if (window.Paddle) {
       initPaddle();
       return;
     }
 
-    // Load Paddle.js
     const script = document.createElement('script');
     script.src = 'https://cdn.paddle.com/paddle/v2/paddle.js';
     script.async = true;
@@ -24,7 +21,7 @@ export function usePaddle() {
     document.body.appendChild(script);
 
     return () => {
-      // Don't remove on unmount - Paddle should persist
+      // Paddle persists globally; don't remove on unmount
     };
   }, []);
 
@@ -49,19 +46,19 @@ export function usePaddle() {
     console.log('Paddle.js initialized');
   };
 
-  const openCheckout = useCallback((transactionId, options = {}) => {
+  const openCheckout = useCallback((config = {}) => {
     if (!paddleRef.current) {
       console.error('Paddle.js not initialized');
       return;
     }
 
     paddleRef.current.Checkout.open({
-      transactionId,
+      ...config,
       settings: {
         theme: 'light',
         locale: 'en',
         successUrl: `${window.location.origin}/credits/success`,
-        ...options,
+        ...config.settings,
       },
     });
   }, []);

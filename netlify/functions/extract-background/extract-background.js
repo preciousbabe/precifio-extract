@@ -4,7 +4,7 @@ const { extractTextFromFile } = require("../services/extractor-service");
 const { cleanOCR } = require("../utils/clean-ocr");
 const AIClient = require("../utils/ai-client");
 const { createClient } = require("@supabase/supabase-js");
-const { calculateExtractionCost, deductCredits } = require("../lib/credit");
+const { calculateExtractionCost, deductCredits } = require("../lib/credits");
 const crypto = require("crypto");
 
 

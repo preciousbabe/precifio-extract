@@ -3,7 +3,7 @@ const config = require("../../../config");
 const { validateUpload } = require("../utils/validate-upload");
 const { createClient } = require("@supabase/supabase-js");
 const parseMultipartLib = require("parse-multipart");
-const { estimateExtractionCost } = require("../lib/credit");
+const { estimateExtractionCost } = require("../lib/credits");
 const crypto = require("crypto");
 
 function parseMultipart(event) {

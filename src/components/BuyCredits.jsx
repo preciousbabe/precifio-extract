@@ -30,7 +30,7 @@ export function BuyCredits({ session, onClose, onSuccess, alert }) {
       });
   }, []);
 
-  const handlePurchase = async (pkg) => {
+    const handlePurchase = async (pkg) => {
     if (!isReady) {
       setError('Payment system is still loading. Please wait a moment.');
       return;
@@ -43,6 +43,7 @@ export function BuyCredits({ session, onClose, onSuccess, alert }) {
       const token = session?.access_token || localStorage.getItem('precifio_token');
       if (!token) throw new Error('Please sign in to purchase credits');
 
+      // 1. Ask backend which Paddle price_id this package maps to
       const response = await fetch(`${API_BASE}/paddle/checkout`, {
         method: 'POST',
         headers: {
@@ -55,8 +56,15 @@ export function BuyCredits({ session, onClose, onSuccess, alert }) {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Checkout initialization failed');
 
-      // Open Paddle overlay checkout directly — NO redirect
-      openCheckout(data.transaction_id);
+      // 2. Open Paddle overlay checkout directly
+      openCheckout({
+        items: [{ priceId: data.price_id, quantity: 1 }],
+        customer: { email: data.user_email },
+        customData: {
+          user_id: session.user.id,
+          package_id: data.package_id,
+        },
+      });
 
     } catch (err) {
       setError(err.message);
