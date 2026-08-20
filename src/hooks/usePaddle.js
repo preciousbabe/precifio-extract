@@ -31,9 +31,17 @@ export function usePaddle() {
       return;
     }
 
+    // ── DEBUG: These must show in your browser console ──
+    console.error('>>> DEBUG VITE_PADDLE_ENVIRONMENT =', JSON.stringify(PADDLE_ENV));
+    console.error('>>> DEBUG PADDLE_CLIENT_TOKEN =', PADDLE_CLIENT_TOKEN ? PADDLE_CLIENT_TOKEN.slice(0, 30) + '...' : 'MISSING');
+    console.error('>>> DEBUG window.location.origin =', window.location.origin);
+    // ─────────────────────────────────────────────────────
+
     if (PADDLE_ENV === 'production') {
+      console.error('>>> DEBUG: Setting Paddle to PRODUCTION');
       window.Paddle.Environment.set('production');
     } else {
+      console.error('>>> DEBUG: Setting Paddle to SANDBOX');
       window.Paddle.Environment.set('sandbox');
     }
 
@@ -51,6 +59,14 @@ export function usePaddle() {
       console.error('Paddle.js not initialized');
       return;
     }
+
+    // ── DEBUG: Log what we are sending to Paddle ──
+    console.error('>>> DEBUG openCheckout config:', JSON.stringify({
+      items: config.items,
+      customer: config.customer,
+      customData: config.customData,
+    }, null, 2));
+    // ───────────────────────────────────────────────
 
     paddleRef.current.Checkout.open({
       ...config,
