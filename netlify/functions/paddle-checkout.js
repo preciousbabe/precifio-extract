@@ -27,13 +27,14 @@ function getPaddle() {
   const apiKey = process.env.PADDLE_API_KEY;
   if (!apiKey) throw new Error("PADDLE_API_KEY is not configured.");
 
-  const env =
+  const isProduction =
     String(process.env.PADDLE_ENVIRONMENT || "sandbox").trim().toLowerCase() ===
-    "production"
-      ? Environment.production
-      : Environment.sandbox;
+    "production";
 
-  paddleClient = new Paddle(apiKey, { environment: env });
+  paddleClient = new Paddle(apiKey, {
+    environment: isProduction ? Environment.production : Environment.sandbox,
+  });
+
   return paddleClient;
 }
 
@@ -64,6 +65,13 @@ exports.handler = async (event, context) => {
     const pkg = getPackageById(packageId);
     if (!pkg) return response(400, { error: "Invalid package" });
 
+    // ── Determine environment early (needed for URL construction) ──
+    const isProduction =
+      String(process.env.PADDLE_ENVIRONMENT || "sandbox").trim().toLowerCase() ===
+      "production";
+
+    const siteUrl = process.env.SITE_URL || "http://localhost:8888";
+
     // ── Create Paddle transaction via SDK ──
     const paddle = getPaddle();
 
@@ -74,23 +82,21 @@ exports.handler = async (event, context) => {
         user_id: user.id,
         package_id: pkg.packageId,
       },
+      returnUrl: `${siteUrl}/credits/success`,
     });
 
     console.log("Paddle transaction created:", JSON.stringify(transaction, null, 2));
 
-    // ── Validate checkout URL ──
-    const checkoutUrl = transaction.checkout?.url;
+    // ── Build the correct hosted checkout URL ──
+    // Paddle sometimes returns the merchant domain in checkout.url.
+    // The hosted checkout always lives on Paddle's domain with ?_ptxn=<id>
+    const hostedCheckoutDomain = isProduction
+      ? "https://checkout.paddle.com"
+      : "https://sandbox-checkout.paddle.com";
 
-    if (!checkoutUrl || typeof checkoutUrl !== "string") {
-      console.error("Paddle transaction missing checkout.url. Transaction:", JSON.stringify(transaction, null, 2));
-      return response(500, { error: "Checkout URL not returned by Paddle" });
-    }
+    const checkoutUrl = `${hostedCheckoutDomain}/?_ptxn=${transaction.id}`;
 
-    // Safety check: it must be a paddle.com domain
-    if (!checkoutUrl.includes("paddle.com")) {
-      console.error("Paddle returned unexpected checkout domain:", checkoutUrl);
-      return response(500, { error: "Invalid checkout URL returned by Paddle" });
-    }
+    console.log("Redirecting to Paddle checkout:", checkoutUrl);
 
     return response(200, {
       checkout_url: checkoutUrl,
