@@ -4,7 +4,7 @@
  * ============================================================
  * PRECIFIO — PADDLE WEBHOOK VERIFICATION
  * ============================================================
- *netlify/functions/paddle/verify.js
+ * netlify/functions/paddle/verify.js
  * This module verifies that a webhook genuinely came from
  * Paddle before Precifio performs ANY credit operation.
  *
@@ -15,6 +15,7 @@
 
 const {
   Paddle,
+  Environment,
 } = require("@paddle/paddle-node-sdk");
 
 
@@ -42,8 +43,19 @@ function getPaddleClient() {
     );
   }
 
+  const env =
+    String(
+      process.env.PADDLE_ENVIRONMENT ||
+      "sandbox"
+    ).trim().toLowerCase() === "production"
+      ? Environment.production
+      : Environment.sandbox;
+
   paddleClient =
-    new Paddle(apiKey);
+    new Paddle(
+      apiKey,
+      { environment: env }
+    );
 
   return paddleClient;
 }

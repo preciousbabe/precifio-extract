@@ -1,26 +1,9 @@
+// netlify/functions/paddle-checkout.js
 "use strict";
 
-/**
- * ============================================================
- * PRECIFIO — PADDLE CHECKOUT CREATION
- * ============================================================
- *
- * Netlify Function:
- * /.netlify/functions/paddle/checkout
- *
- * Responsibilities:
- * 1. Authenticate the Precifio user
- * 2. Validate the requested package_id against packages.js
- * 3. Create a Paddle transaction (backend → Paddle API)
- * 4. Return the checkout URL to the frontend
- *
- * The frontend NEVER touches Paddle directly.
- * ============================================================
- */
-
+const { Paddle, Environment } = require("@paddle/paddle-node-sdk");
 const { getSupabaseAdmin } = require("./paddle/supabase");
 const { getPackageById } = require("./paddle/packages");
-const { PADDLE_API_BASE_URL } = require("./paddle/config");
 
 const CORS = {
   "Access-Control-Allow-Origin": process.env.CORS_ORIGIN || "*",
@@ -34,6 +17,24 @@ function response(statusCode, body) {
     headers: { ...CORS, "Content-Type": "application/json" },
     body: JSON.stringify(body),
   };
+}
+
+let paddleClient = null;
+
+function getPaddle() {
+  if (paddleClient) return paddleClient;
+
+  const apiKey = process.env.PADDLE_API_KEY;
+  if (!apiKey) throw new Error("PADDLE_API_KEY is not configured.");
+
+  const env =
+    String(process.env.PADDLE_ENVIRONMENT || "sandbox").trim().toLowerCase() ===
+    "production"
+      ? Environment.production
+      : Environment.sandbox;
+
+  paddleClient = new Paddle(apiKey, { environment: env });
+  return paddleClient;
 }
 
 exports.handler = async (event, context) => {
@@ -52,60 +53,52 @@ exports.handler = async (event, context) => {
     if (authErr || !user) return response(401, { error: "Invalid token" });
 
     // ── Validate package ──
-    const body = JSON.parse(event.body || "{}");
-    const packageId = body.package_id;
+    let body = {};
+    try {
+      body = JSON.parse(event.body || "{}");
+    } catch (e) {
+      return response(400, { error: "Invalid JSON body" });
+    }
 
+    const packageId = body.package_id;
     const pkg = getPackageById(packageId);
     if (!pkg) return response(400, { error: "Invalid package" });
 
-    // ── Create Paddle transaction ──
-    const paddleRes = await fetch(`${PADDLE_API_BASE_URL}/transactions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${process.env.PADDLE_API_KEY}`,
+    // ── Create Paddle transaction via SDK ──
+    const paddle = getPaddle();
+
+    const transaction = await paddle.transactions.create({
+      items: [{ priceId: pkg.priceId, quantity: 1 }],
+      customer: { email: user.email },
+      customData: {
+        user_id: user.id,
+        package_id: pkg.packageId,
       },
-      body: JSON.stringify({
-        items: [{ price_id: pkg.priceId, quantity: 1 }],
-        customer: { email: user.email },
-        custom_data: {
-          user_id: user.id,
-          package_id: pkg.packageId,
-        },
-        return_url: `${process.env.SITE_URL || "http://localhost:8888"}/credits/success`,
-      }),
     });
 
-    const paddleData = await paddleRes.json();
+    console.log("Paddle transaction created:", JSON.stringify(transaction, null, 2));
 
-    if (!paddleRes.ok) {
-  console.error(
-    "Paddle checkout error:",
-    JSON.stringify(paddleData, null, 2)
-  );
+    // ── Validate checkout URL ──
+    const checkoutUrl = transaction.checkout?.url;
 
-  return response(500, {
-    error:
-      paddleData?.error?.detail ||
-      paddleData?.error?.message ||
-      paddleData?.error?.type ||
-      "Checkout creation failed",
-  });
-}
-
-      const checkoutUrl = paddleData.data?.checkout?.url;
-    if (!checkoutUrl) {
-      console.error("Paddle response missing checkout.url:", JSON.stringify(paddleData, null, 2));
+    if (!checkoutUrl || typeof checkoutUrl !== "string") {
+      console.error("Paddle transaction missing checkout.url. Transaction:", JSON.stringify(transaction, null, 2));
       return response(500, { error: "Checkout URL not returned by Paddle" });
+    }
+
+    // Safety check: it must be a paddle.com domain
+    if (!checkoutUrl.includes("paddle.com")) {
+      console.error("Paddle returned unexpected checkout domain:", checkoutUrl);
+      return response(500, { error: "Invalid checkout URL returned by Paddle" });
     }
 
     return response(200, {
       checkout_url: checkoutUrl,
-      transaction_id: paddleData.data?.id,
+      transaction_id: transaction.id,
     });
 
   } catch (err) {
     console.error("Checkout error:", err);
-    return response(500, { error: err.message });
+    return response(500, { error: err.message || "Checkout creation failed" });
   }
 };
