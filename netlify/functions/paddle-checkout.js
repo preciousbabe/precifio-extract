@@ -98,10 +98,10 @@ exports.handler = async (event, context) => {
 
     console.log("Redirecting to Paddle checkout:", checkoutUrl);
 
-    return response(200, {
-      checkout_url: checkoutUrl,
-      transaction_id: transaction.id,
-    });
+   return response(200, {
+  transaction_id: transaction.id,   
+  package_id: pkg.packageId,
+});
 
   } catch (err) {
     console.error("Checkout error:", err);

@@ -1,35 +1,41 @@
 // src/components/buyCredit.jsx
-
 import { useState, useEffect } from 'react';
+import { usePaddle } from '../hooks/usePaddle';
 
 const API_BASE = '/api';
 
 export function BuyCredits({ session, onClose, onSuccess, alert }) {
+  const { isReady, openCheckout } = usePaddle();
   const [packages, setPackages] = useState([]);
   const [loadingPkg, setLoadingPkg] = useState(null);
   const [error, setError] = useState(null);
   const [fetching, setFetching] = useState(true);
 
   useEffect(() => {
-  fetch(`${API_BASE}/paddle/list-packages`)
-    .then(async (r) => {
-      if (!r.ok) {
-        const text = await r.text();
-        throw new Error(`Server ${r.status}: ${text.slice(0, 200)}`);
-      }
-      return r.json();
-    })
-    .then((data) => {
-      setPackages(data.packages || []);
-      setFetching(false);
-    })
-    .catch((err) => {
-      setError(`Failed to load packages: ${err.message}`);
-      setFetching(false);
-    });
-}, []);
+    fetch(`${API_BASE}/paddle/list-packages`)
+      .then(async (r) => {
+        if (!r.ok) {
+          const text = await r.text();
+          throw new Error(`Server ${r.status}: ${text.slice(0, 200)}`);
+        }
+        return r.json();
+      })
+      .then((data) => {
+        setPackages(data.packages || []);
+        setFetching(false);
+      })
+      .catch((err) => {
+        setError(`Failed to load packages: ${err.message}`);
+        setFetching(false);
+      });
+  }, []);
 
   const handlePurchase = async (pkg) => {
+    if (!isReady) {
+      setError('Payment system is loading. Please try again in a moment.');
+      return;
+    }
+
     setLoadingPkg(pkg.id);
     setError(null);
 
@@ -49,13 +55,16 @@ export function BuyCredits({ session, onClose, onSuccess, alert }) {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Checkout initialization failed');
 
-      // Redirect to Paddle checkout — zero frontend payment authority
-      window.location.href = data.checkout_url;
+      // Open Paddle overlay checkout directly — no redirect
+      openCheckout(data.transaction_id);
+
     } catch (err) {
       setError(err.message);
+    } finally {
       setLoadingPkg(null);
     }
   };
+
 
   const formatPrice = (cents) => `$${(cents / 100).toFixed(0)}`;
 

@@ -93,6 +93,24 @@ useEffect(() => {
     }
   }, [network.isBad, queue.processing, queue.pause]);
 
+
+  useEffect(() => {
+  const urlParams = new URLSearchParams(window.location.search);
+  const ptxn = urlParams.get('_ptxn');
+  
+  if (ptxn && window.Paddle) {
+    window.Paddle.Checkout.open({
+      transactionId: ptxn,
+      settings: {
+        successUrl: `${window.location.origin}/credits/success`
+      }
+    });
+    
+    // Clean up URL
+    window.history.replaceState({}, document.title, window.location.pathname);
+  }
+}, []);
+
   const token = localStorage.getItem('precifio_token');
 
   return (
