@@ -32,7 +32,7 @@ export function BuyCredits({ session, onClose, onSuccess, alert }) {
 
   const handlePurchase = async (pkg) => {
     if (!isReady) {
-      setError('Payment system is loading. Please try again in a moment.');
+      setError('Payment system is still loading. Please wait a moment.');
       return;
     }
 
@@ -55,7 +55,7 @@ export function BuyCredits({ session, onClose, onSuccess, alert }) {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Checkout initialization failed');
 
-      // Open Paddle overlay checkout directly — no redirect
+      // Open Paddle overlay checkout directly — NO redirect
       openCheckout(data.transaction_id);
 
     } catch (err) {
@@ -64,7 +64,6 @@ export function BuyCredits({ session, onClose, onSuccess, alert }) {
       setLoadingPkg(null);
     }
   };
-
 
   const formatPrice = (cents) => `$${(cents / 100).toFixed(0)}`;
 
@@ -122,6 +121,12 @@ export function BuyCredits({ session, onClose, onSuccess, alert }) {
           </div>
         )}
 
+        {!isReady && !fetching && (
+          <div style={{ padding: '12px', background: '#fef3c7', borderRadius: '8px', color: '#92400e', marginBottom: '16px', fontSize: '14px' }}>
+            Initializing payment system...
+          </div>
+        )}
+
         {fetching ? (
           <div style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>Loading packages...</div>
         ) : (
@@ -171,7 +176,7 @@ export function BuyCredits({ session, onClose, onSuccess, alert }) {
                     </div>
                   </div>
                   <button
-                    disabled={loadingPkg === pkg.id}
+                    disabled={loadingPkg === pkg.id || !isReady}
                     style={{
                       padding: '10px 24px',
                       background: pkg.popular ? '#10b981' : '#1e40af',
@@ -179,9 +184,9 @@ export function BuyCredits({ session, onClose, onSuccess, alert }) {
                       border: 'none',
                       borderRadius: '8px',
                       fontWeight: 600,
-                      cursor: 'pointer',
+                      cursor: loadingPkg === pkg.id || !isReady ? 'not-allowed' : 'pointer',
                       fontSize: '14px',
-                      opacity: loadingPkg === pkg.id ? 0.7 : 1,
+                      opacity: loadingPkg === pkg.id || !isReady ? 0.7 : 1,
                       whiteSpace: 'nowrap'
                     }}
                   >

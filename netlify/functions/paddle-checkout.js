@@ -65,13 +65,6 @@ exports.handler = async (event, context) => {
     const pkg = getPackageById(packageId);
     if (!pkg) return response(400, { error: "Invalid package" });
 
-    // ── Determine environment early (needed for URL construction) ──
-    const isProduction =
-      String(process.env.PADDLE_ENVIRONMENT || "sandbox").trim().toLowerCase() ===
-      "production";
-
-    const siteUrl = process.env.SITE_URL || "http://localhost:8888";
-
     // ── Create Paddle transaction via SDK ──
     const paddle = getPaddle();
 
@@ -82,26 +75,22 @@ exports.handler = async (event, context) => {
         user_id: user.id,
         package_id: pkg.packageId,
       },
-      returnUrl: `${siteUrl}/credits/success`,
     });
 
     console.log("Paddle transaction created:", JSON.stringify(transaction, null, 2));
 
-    // ── Build the correct hosted checkout URL ──
-    // Paddle sometimes returns the merchant domain in checkout.url.
-    // The hosted checkout always lives on Paddle's domain with ?_ptxn=<id>
-    const hostedCheckoutDomain = isProduction
-      ? "https://checkout.paddle.com"
-      : "https://sandbox-checkout.paddle.com";
+    const checkoutUrl = transaction.checkout?.url;
+    const transactionId = transaction.id;
 
-    const checkoutUrl = `${hostedCheckoutDomain}/?_ptxn=${transaction.id}`;
+    if (!checkoutUrl || !transactionId) {
+      console.error("Paddle response missing checkout data:", JSON.stringify(transaction, null, 2));
+      return response(500, { error: "Checkout data not returned by Paddle" });
+    }
 
-    console.log("Redirecting to Paddle checkout:", checkoutUrl);
-
-   return response(200, {
-  transaction_id: transaction.id,   
-  package_id: pkg.packageId,
-});
+    return response(200, {
+      transaction_id: transactionId,
+      checkout_url: checkoutUrl,   // e.g., https://extract.precifio.app?_ptxn=txn_...
+    });
 
   } catch (err) {
     console.error("Checkout error:", err);

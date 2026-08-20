@@ -94,22 +94,30 @@ useEffect(() => {
   }, [network.isBad, queue.processing, queue.pause]);
 
 
-  useEffect(() => {
-  const urlParams = new URLSearchParams(window.location.search);
-  const ptxn = urlParams.get('_ptxn');
-  
-  if (ptxn && window.Paddle) {
-    window.Paddle.Checkout.open({
-      transactionId: ptxn,
-      settings: {
-        successUrl: `${window.location.origin}/credits/success`
+   useEffect(() => {
+    // If Paddle.js is loaded and there's a _ptxn in the URL, open the checkout
+    const checkPaddle = setInterval(() => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const ptxn = urlParams.get('_ptxn');
+
+      if (ptxn && window.Paddle) {
+        window.Paddle.Checkout.open({
+          transactionId: ptxn,
+          settings: {
+            successUrl: `${window.location.origin}/credits/success`,
+          },
+        });
+
+        // Clean up URL without reloading
+        window.history.replaceState({}, document.title, window.location.pathname);
+        clearInterval(checkPaddle);
       }
-    });
-    
-    // Clean up URL
-    window.history.replaceState({}, document.title, window.location.pathname);
-  }
-}, []);
+    }, 100);
+
+    // Stop checking after 5 seconds
+    setTimeout(() => clearInterval(checkPaddle), 5000);
+  }, []);
+
 
   const token = localStorage.getItem('precifio_token');
 
