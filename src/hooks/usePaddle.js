@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 
-const PADDLE_ENV = import.meta.env.VITE_PADDLE_ENVIRONMENT || 'sandbox';
-const PADDLE_CLIENT_TOKEN = import.meta.env.VITE_PADDLE_CLIENT_TOKEN;
+// HARDCODED — bypasses all env variables and build caching
+const PADDLE_ENV = 'sandbox';
+const PADDLE_CLIENT_TOKEN = 'test_5131257971a18d2b76da882ef96';
 
 export function usePaddle() {
   const [isReady, setIsReady] = useState(false);
@@ -20,9 +21,7 @@ export function usePaddle() {
     script.onerror = () => console.error('Failed to load Paddle.js');
     document.body.appendChild(script);
 
-    return () => {
-      // Paddle persists globally; don't remove on unmount
-    };
+    return () => {};
   }, []);
 
   const initPaddle = () => {
@@ -31,19 +30,8 @@ export function usePaddle() {
       return;
     }
 
-    // ── DEBUG: These must show in your browser console ──
-    console.error('>>> DEBUG VITE_PADDLE_ENVIRONMENT =', JSON.stringify(PADDLE_ENV));
-    console.error('>>> DEBUG PADDLE_CLIENT_TOKEN =', PADDLE_CLIENT_TOKEN ? PADDLE_CLIENT_TOKEN.slice(0, 30) + '...' : 'MISSING');
-    console.error('>>> DEBUG window.location.origin =', window.location.origin);
-    // ─────────────────────────────────────────────────────
-
-    if (PADDLE_ENV === 'production') {
-      console.error('>>> DEBUG: Setting Paddle to PRODUCTION');
-      window.Paddle.Environment.set('production');
-    } else {
-      console.error('>>> DEBUG: Setting Paddle to SANDBOX');
-      window.Paddle.Environment.set('sandbox');
-    }
+    console.error('>>> HARDCODED ENV =', PADDLE_ENV);
+    window.Paddle.Environment.set('sandbox');
 
     window.Paddle.Initialize({
       token: PADDLE_CLIENT_TOKEN,
@@ -51,7 +39,7 @@ export function usePaddle() {
 
     paddleRef.current = window.Paddle;
     setIsReady(true);
-    console.log('Paddle.js initialized');
+    console.log('Paddle.js initialized in SANDBOX mode');
   };
 
   const openCheckout = useCallback((config = {}) => {
@@ -59,14 +47,6 @@ export function usePaddle() {
       console.error('Paddle.js not initialized');
       return;
     }
-
-    // ── DEBUG: Log what we are sending to Paddle ──
-    console.error('>>> DEBUG openCheckout config:', JSON.stringify({
-      items: config.items,
-      customer: config.customer,
-      customData: config.customData,
-    }, null, 2));
-    // ───────────────────────────────────────────────
 
     paddleRef.current.Checkout.open({
       ...config,
