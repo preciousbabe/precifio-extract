@@ -79,9 +79,19 @@ exports.handler = async (event, context) => {
     const paddleData = await paddleRes.json();
 
     if (!paddleRes.ok) {
-      console.error("Paddle checkout error:", paddleData);
-      return response(500, { error: "Checkout creation failed" });
-    }
+  console.error(
+    "Paddle checkout error:",
+    JSON.stringify(paddleData, null, 2)
+  );
+
+  return response(500, {
+    error:
+      paddleData?.error?.detail ||
+      paddleData?.error?.message ||
+      paddleData?.error?.type ||
+      "Checkout creation failed",
+  });
+}
 
       const checkoutUrl = paddleData.data?.checkout?.url;
     if (!checkoutUrl) {
