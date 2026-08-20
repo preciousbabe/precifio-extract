@@ -4,21 +4,6 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/favIcon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-
-    <script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>
-<script type="text/javascript">
-  const paddleEnv = "%PADDLE_ENVIRONMENT%"; // We'll inject this at build time
-  if (paddleEnv === "production") {
-    Paddle.Environment.set("production");
-  } else {
-    Paddle.Environment.set("sandbox");
-  }
-  Paddle.Initialize({
-    token: "%PADDLE_CLIENT_TOKEN%"
-  });
-</script>
-
-
     <title>Precifio Extract</title>
   </head>
   <body>
