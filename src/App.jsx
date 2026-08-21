@@ -12,6 +12,7 @@ import { useDocumentQueue } from "./hooks/useDocumentQueue";
 import { useQueueProcessor } from "./hooks/useQueueProcessor";
 import { useNetworkStatus } from "./hooks/useNetworkStatus";
 import { AuthProvider, useAuth } from "./hooks/useAuth";
+import { PaymentSuccess } from './components/PaymentSuccess';
 
 function AppContent() {
   // ✅ MUST be first — before any useEffect that uses these values
@@ -29,9 +30,12 @@ function AppContent() {
   const [showBuyCredits, setShowBuyCredits] = useState(false);
   const [creditAlert, setCreditAlert] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
-    const [showAdmin, setShowAdmin] = useState(false);
+  const [showAdmin, setShowAdmin] = useState(false);
   const queue = useDocumentQueue();
   const network = useNetworkStatus();
+  const [showPaymentSuccess, setShowPaymentSuccess] = useState(
+    window.location.pathname === '/credits/success'
+  );
   
   useQueueProcessor(queue);
 
@@ -150,19 +154,20 @@ useEffect(() => {
         </div>
       </header>
 
-      {/* Low credits warning banner */}
-      {!isGuest && profile && profile.credits_remaining <= 5 && profile.credits_remaining > 0 && (
-        <div className="credit-warning-banner">
-          <span>⚠️ You have {profile.credits_remaining} credit{profile.credits_remaining !== 1 ? 's' : ''} left.</span>
-          <button onClick={() => {
-            setCreditAlert(null);
-            setShowBuyCredits(true);
-          }}>
-            Buy more
-          </button>
-        </div>
-      )}
-
+     {/* Low credits warning banner */}
+{!isGuest && profile && profile.credits_remaining <= 5 && profile.credits_remaining > 0 && (
+  <div className="credit-warning-banner">
+    <span>⚠️ You have {profile.credits_remaining} credit{profile.credits_remaining !== 1 ? 's' : ''} left.</span>
+    <button onClick={() => {
+      // Pass a lightweight alert so the $5 mini appears
+      setCreditAlert({ required: 1, available: profile.credits_remaining, fileName: 'your documents' });
+      setShowBuyCredits(true);
+    }}>
+      Buy more
+    </button>
+  </div>
+  )}
+  
       <NetworkStatus status={network} />
 
             <main className="app-main">
@@ -248,6 +253,18 @@ useEffect(() => {
       </footer>
 
       <AuthModal />
+
+            {/* Payment Success Overlay */}
+      {showPaymentSuccess && (
+        <PaymentSuccess
+          profile={profile}
+          onDone={() => {
+            setShowPaymentSuccess(false);
+            window.history.replaceState({}, '', '/');
+            localStorage.removeItem('precifio_pending_credits');
+          }}
+        />
+      )}
 
       {showBuyCredits && (
         <BuyCredits

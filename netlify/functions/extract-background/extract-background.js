@@ -4,7 +4,7 @@ const { extractTextFromFile } = require("../services/extractor-service");
 const { cleanOCR } = require("../utils/clean-ocr");
 const AIClient = require("../utils/ai-client");
 const { createClient } = require("@supabase/supabase-js");
-const { calculateExtractionCost, deductCredits } = require("../lib/credits");
+const { calculateExtractionCost, deductCredits, estimateExtractionCost } = require("../lib/credits");
 const crypto = require("crypto");
 
 
@@ -149,7 +149,8 @@ exports.handler = async (event, context) => {
     // ── 5. Credit check (read-only, fail fast) ──
     const isGuest = !job.user_id;
     const userId = job.user_id;
-    const cost = estimateCreditCost(cleanedText, file.name);
+    const wordCount = cleanedText.split(/\s+/).filter((w) => w.length > 0).length;
+    const cost = estimateExtractionCost(wordCount);
 
     if (!isGuest && userId) {
       const { data: profile } = await supabase.from("profiles").select("credits_remaining").eq("id", userId).single();

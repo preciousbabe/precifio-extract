@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 
-// HARDCODED — bypasses all env variables and build caching
-const PADDLE_ENV = 'sandbox';
-const PADDLE_CLIENT_TOKEN = 'test_5131257971a18d2b76da882ef96';
+const PADDLE_ENV = import.meta.env.VITE_PADDLE_ENVIRONMENT || 'production';
+const PADDLE_CLIENT_TOKEN = import.meta.env.VITE_PADDLE_CLIENT_TOKEN;
 
 export function usePaddle() {
   const [isReady, setIsReady] = useState(false);
@@ -30,8 +29,11 @@ export function usePaddle() {
       return;
     }
 
-    console.error('>>> HARDCODED ENV =', PADDLE_ENV);
-    window.Paddle.Environment.set('sandbox');
+    if (PADDLE_ENV === 'sandbox') {
+      window.Paddle.Environment.set('sandbox');
+    } else {
+      window.Paddle.Environment.set('production');
+    }
 
     window.Paddle.Initialize({
       token: PADDLE_CLIENT_TOKEN,
@@ -39,7 +41,6 @@ export function usePaddle() {
 
     paddleRef.current = window.Paddle;
     setIsReady(true);
-    console.log('Paddle.js initialized in SANDBOX mode');
   };
 
   const openCheckout = useCallback((config = {}) => {

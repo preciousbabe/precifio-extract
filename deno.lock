@@ -12,7 +12,8 @@
     "packageJson": {
       "dependencies": [
         "npm:@napi-rs/canvas@^1.0.2",
-        "npm:@supabase/supabase-js@^2.110.1",
+        "npm:@paddle/paddle-node-sdk@^3.10.0",
+        "npm:@supabase/supabase-js@^2.112.3",
         "npm:@types/react-dom@^19.2.3",
         "npm:@types/react@^19.2.14",
         "npm:@vitejs/plugin-react@^6.0.1",

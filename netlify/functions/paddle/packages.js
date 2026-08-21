@@ -16,9 +16,21 @@
 
 const PADDLE_PRICE_MAP = Object.freeze({
   /**
+   * Quick Top-up — 50 Credits ($5.00)
+   * TODO: Replace with your real Paddle price ID
+   */
+  "pri_01m0grh8nkhztk13vfybh50h48": Object.freeze({
+    packageId: "mini",
+    credits: 50,
+    priceCents: 500,
+    expectedAmount: "500",
+    expectedCurrency: "USD",
+    description: "Precifio Quick Top-up — 50 Credits",
+  }),
+  /**
    * Starter — 100 Credits ($10.00)
    */
-  "pri_01m07w0he8my3apktgrdt9a6jj": Object.freeze({
+  "pri_01m0grp35gffe2e1v07x3tjafy": Object.freeze({
     packageId: "starter",
     credits: 100,
     priceCents: 1000,
@@ -31,7 +43,7 @@ const PADDLE_PRICE_MAP = Object.freeze({
    * Growth — 275 Credits ($25.00)
    * TODO: Replace placeholder with your real Paddle price ID
    */
-  "pri_GROWTH_REPLACE_ME": Object.freeze({
+  "pri_01m0gs41hp5ezmqvd8qxr8evbd": Object.freeze({
     packageId: "growth",
     credits: 275,
     priceCents: 2500,
@@ -39,12 +51,11 @@ const PADDLE_PRICE_MAP = Object.freeze({
     expectedCurrency: "USD",
     description: "Precifio Growth — 275 Credits",
   }),
-
   /**
    * Business — 600 Credits ($50.00)
    * TODO: Replace placeholder with your real Paddle price ID
    */
-  "pri_BUSINESS_REPLACE_ME": Object.freeze({
+  "pri_01m0gs7y2ggxt3zhfp4n0fd7qb": Object.freeze({
     packageId: "business",
     credits: 600,
     priceCents: 5000,
@@ -57,7 +68,7 @@ const PADDLE_PRICE_MAP = Object.freeze({
    * Enterprise — 1,300 Credits ($100.00)
    * TODO: Replace placeholder with your real Paddle price ID
    */
-  "pri_ENTERPRISE_REPLACE_ME": Object.freeze({
+  "pri_01m0gsc000dq2seffn072h0app": Object.freeze({
     packageId: "enterprise",
     credits: 1300,
     priceCents: 10000,

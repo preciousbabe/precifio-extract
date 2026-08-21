@@ -141,7 +141,7 @@ async function deductCredits(supabase, userId, amount, feature, referenceId, met
     user_id: userId,
     amount: -amount,
     type: "debit",
-    feature: feature,        // "extraction" or "reconciliation"
+    feature: feature,        
     reference_id: referenceId,
     balance_after: newBalance,
     metadata: metadata,
