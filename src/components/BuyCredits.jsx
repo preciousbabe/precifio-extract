@@ -249,4 +249,3 @@ export function BuyCredits({ session, onClose, onSuccess, alert }) {
     </div>
   );
 }
-

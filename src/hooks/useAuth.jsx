@@ -29,7 +29,7 @@ export function AuthProvider({ children }) {
       }
 
       if (!res.ok) {
-        console.warn(`Auth check returned ${res.status}, preserving session`);
+        // console.warn(`Auth check returned ${res.status}, preserving session`);
         setLoading(false);
         return true;
       }
@@ -39,7 +39,7 @@ export function AuthProvider({ children }) {
         data = await res.json();
       } catch (parseErr) {
         // 502 Bad Gateway sometimes returns HTML — don't log the user out for that
-        console.warn('Auth response unparseable, preserving session');
+        // console.warn('Auth response unparseable, preserving session');
         setLoading(false);
         return true;
       }
@@ -54,7 +54,7 @@ export function AuthProvider({ children }) {
       }
 
       // 200 OK but no user object — weird, but don't wipe
-      console.warn('Auth returned 200 but no user, preserving session');
+      // console.warn('Auth returned 200 but no user, preserving session');
       setLoading(false);
       return true;
 
@@ -69,7 +69,7 @@ export function AuthProvider({ children }) {
       }
 
       // Everything else (fetch failed, timeout, DNS, parse error, etc.) = transient
-      console.warn('Network/transient auth error, preserving session:', err.message);
+      // console.warn('Network/transient auth error, preserving session:', err.message);
       setLoading(false);
       return true;
     } finally {
@@ -193,7 +193,7 @@ export function AuthProvider({ children }) {
         setProfile(data.profile);
       }
     } catch (err) {
-      console.error('Refresh profile error:', err);
+      // console.error('Refresh profile error:', err);
     }
   }, []);
 

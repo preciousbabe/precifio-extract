@@ -85,10 +85,10 @@ async function cleanupOrphanedFiles(supabase) {
       await supabase.from("extractions")
         .update({ storage_path: null })
         .in("id", oldJobs.map(j => j.id));
-      console.log(`Cleaned up ${paths.length} orphaned files`);
+      // console.log(`Cleaned up ${paths.length} orphaned files`);
     }
   } catch (e) {
-    console.warn("Orphan cleanup failed:", e.message);
+    console.warn("Orphan cleanup failed:");
   }
 }
 
@@ -118,7 +118,7 @@ exports.handler = async (event, context) => {
 
     // ── 2. Idempotency: already completed? ──
     if (job.status === "completed" && job.raw_result) {
-      console.log(`Background worker: ${extractionId} already completed. Skipping.`);
+      // console.log(`Background worker: ${extractionId} already completed. Skipping.`);
       await cleanupStorage(supabase, job.storage_path);
       return { statusCode: 200, body: JSON.stringify({ status: "already_completed", extractionId }) };
     }

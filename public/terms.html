@@ -96,14 +96,67 @@
       background: #e2e8f0;
     }
 
-    .footer {
-      margin-top: 48px;
-      padding-top: 24px;
-      border-top: 1px solid var(--border);
-      text-align: center;
-      font-size: 0.85rem;
-      color: var(--muted);
-    }
+    .app-footer {
+  margin-top: 48px;
+  padding: 24px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--card);
+}
+
+.footer-inner {
+  max-width: 800px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+}
+
+.footer-brand {
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--text);
+}
+
+.footer-links {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.footer-links a {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.footer-links a:hover {
+  text-decoration: underline;
+}
+
+.footer-dot {
+  color: var(--muted);
+  font-size: 0.85rem;
+  user-select: none;
+}
+
+.footer-copy {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+@media (max-width: 600px) {
+  .app-footer {
+    padding: 20px 16px;
+  }
+  .footer-inner {
+    gap: 10px;
+  }
+}
     @media (max-width: 600px) {
       .container { padding: 28px; }
       h1 { font-size: 1.4rem; }
@@ -121,16 +174,16 @@
     <h1>Terms of Service</h1>
     <p class="last-updated">Last updated: July 2026</p>
 
-    <p>Welcome to Precifio Extract. By using our service, you agree to these terms. Please read them carefully.</p>
+    <p>These Terms of Service ("Terms") are a legal agreement between you and Precifio ("we," "us," or "our"), the operator of Precifio Extract. <strong>Precifio Extract is a service operated by Precifio.</strong> By using our service, you agree to these terms.</p>
 
     <h2>1. Service Description</h2>
-    <p>Precifio Extract provides AI-powered document extraction services. Users may upload invoices, receipts, bank statements, and other supported document types to extract structured data for export to accounting platforms such as Xero and QuickBooks, or via email and downloadable formats.</p>
+    <p>Precifio Extract provides AI-powered document extraction services. Users may upload invoices, receipts, bank statements, and other supported document types to extract structured data for export to  platforms such as Slack, Email and Webhook, or via email and downloadable formats.</p>
 
     <h2>2. User Accounts & Credits</h2>
     <ul>
       <li>Guest users receive one free extraction without creating an account.</li>
       <li>Registered users receive complimentary credits upon sign-up. Additional credits must be purchased.</li>
-      <li>Credits are non-refundable and non-transferable unless required by law.</li>
+      <li>All purchases are backed by a 14-day money-back guarantee. If you are not satisfied for any reason, contact us at support@precifio.app within 14 days of purchase for a full refund. No questions asked.</li>
       <li>You are responsible for maintaining the confidentiality of your account credentials.</li>
     </ul>
 
@@ -146,7 +199,7 @@
     <p>We operate a strict zero data-retention policy for extracted content. Documents and extracted data are held only for the duration of your active session and are permanently deleted once you close the application or export your results. Please refer to our <a href="/privacy">Privacy Policy</a> for full details.</p>
 
     <h2>5. Third-Party Integrations</h2>
-    <p>When you choose to export data to Xero, QuickBooks, or other third-party services, you are also bound by those platforms' respective terms of service. We are not responsible for data handling practices once information is transmitted to external platforms.</p>
+    <p>When you choose to export data to Webhook, Slack, or other third-party services, you are also bound by those platforms' respective terms of service. We are not responsible for data handling practices once information is transmitted to external platforms.</p>
 
     <h2>6. Limitation of Liability</h2>
     <p>Precifio Extract is provided "as is" without warranties of any kind. While we strive for accuracy, AI extraction may contain errors. You agree to verify all extracted data before using it for financial, legal, or compliance purposes. We are not liable for any losses arising from reliance on extracted data.</p>
@@ -157,16 +210,31 @@
     <h2>8. Changes to Terms</h2>
     <p>We may update these terms from time to time. Continued use of the service after changes constitutes acceptance of the revised terms.</p>
 
-    <h2>9. Contact</h2>
+    <h2>9. Governing Law</h2>
+    <p>These Terms shall be governed by and construed in accordance with the laws of the Federal Republic of Nigeria, without regard to its conflict of law provisions.</p>
+    
+    <h2>10. Contact</h2>
     <p>For questions about these terms, contact us at:</p>
     <p class="email-row">
       <a href="mailto:support@precifio.app">support@precifio.app</a>
       <a class="gmail-fallback" href="https://mail.google.com/mail/?view=cm&fs=1&to=support@precifio.app&su=Terms%20Question%20-%20Precifio%20Extract" target="_blank" rel="noopener noreferrer">Open in Gmail ↗</a>
     </p>
 
-    <div class="footer">
-      &copy; 2026 Precifio Extract. <a href="/">Back to app</a> &middot; <a href="/privacy">Privacy Policy</a> &middot; <a href="/support">Support</a>
+   <footer class="app-footer">
+  <div class="footer-inner">
+    <span class="footer-brand">Precifio Extract</span>
+    <div class="footer-links">
+      <a href="/terms" target="_blank" rel="noopener noreferrer">Terms</a>
+      <span class="footer-dot">·</span>
+      <a href="/privacy" target="_blank" rel="noopener noreferrer">Privacy</a>
+      <span class="footer-dot">·</span>
+      <a href="/support" target="_blank" rel="noopener noreferrer">Support</a>
+      <span class="footer-dot">·</span>
+      <a href="/refund-policy" target="_blank" rel="noopener noreferrer">Policy</a>
     </div>
+    <span class="footer-copy">&copy; 2026 Precifio</span>
+  </div>
+</footer>
   </div>
 </body>
 </html>

@@ -43,10 +43,6 @@ export async function disconnectIntegration(
 
   const result = await res.json();
 
-  console.log("========== FRONTEND ==========");
-console.log(result);
-console.log("authorizeUrl =", result.authorizeUrl);
-console.log("==============================");
 
 // STOP HERE
 return;

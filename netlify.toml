@@ -15,6 +15,11 @@
   to = "/terms.html"
   status = 200
 
+  [[redirects]]
+  from = "/refund-policy"
+  to = "/refund-policy.html"
+  status = 200
+
 [[redirects]]
   from = "/privacy"
   to = "/privacy.html"

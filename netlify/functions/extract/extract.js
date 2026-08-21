@@ -413,7 +413,7 @@ exports.handler = async (event, context) => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ extractionId }),
-    }).catch((err) => console.error("Background trigger failed:", err.message));
+    }).catch((err) => console.error("Background trigger failed:"));
 
     // ── Return 202 Accepted immediately ──
     return {
@@ -428,7 +428,7 @@ exports.handler = async (event, context) => {
     };
 
   } catch (err) {
-    console.error("Extract orchestrator error:", err);
+    console.error("Extract orchestrator error:");
     return { statusCode: 500, headers, body: JSON.stringify({ error: "Extraction failed", message: err.message }) };
   }
 };

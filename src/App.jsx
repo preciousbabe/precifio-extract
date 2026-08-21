@@ -211,7 +211,7 @@ useEffect(() => {
             <div className="guest-features">
               <span className="feature-item">✅ 10 free credits when you sign up</span>
               <span className="feature-item">✅ No credit card required</span>
-              <span className="feature-item">✅ Export to Xero & QuickBooks</span>
+              {/* <span className="feature-item">✅ Export to Xero & QuickBooks</span> */}
               <span className="feature-item">✅ Batch processing supported</span>
               <span className="feature-item">✅ Zero data retention — export before closing or your data is lost permanently.</span>
                         </div>
@@ -246,9 +246,11 @@ useEffect(() => {
             <a href="/privacy" target="_blank" rel="noopener noreferrer">Privacy</a>
             <span className="footer-dot">·</span>
             <a href="/support" target="_blank" rel="noopener noreferrer">Support</a>
+            <span className="footer-dot">·</span>
+            <a href="/refund-policy" target="_blank" rel="noopener noreferrer">Policy</a>
             
           </div>
-          <span className="footer-copy">&copy; 2026</span>
+          <span className="footer-copy">&copy; 2026 Precifio</span>
         </div>
       </footer>
 
