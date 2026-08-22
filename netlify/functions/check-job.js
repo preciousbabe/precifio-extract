@@ -17,11 +17,11 @@ exports.handler = async (event) => {
   if (event.httpMethod !== "GET") return { statusCode: 405, headers, body: JSON.stringify({ error: "Method not allowed" }) };
 
   const jobId = event.queryStringParameters?.jobId;
-
+  
   const authHeader = event.headers.authorization || event.headers.Authorization;
   const token = authHeader ? authHeader.replace(/^Bearer\s+/i, "") : null;
   const guestId = event.headers["x-guest-id"] || event.headers["X-Guest-Id"] || null;
-
+  
   console.log("[CHECK-JOB] Poll received. jobId:", jobId, "hasToken:", !!token, "hasGuest:", !!guestId);
 
   let userId = null;
@@ -43,7 +43,7 @@ exports.handler = async (event) => {
     const belongsToCurrentRequester =
       (job.user_id && userId && job.user_id === userId) ||
       (job.guest_id && guestId && job.guest_id === guestId);
-
+    
     if (!belongsToCurrentRequester) {
       return { 
         statusCode: 403, 

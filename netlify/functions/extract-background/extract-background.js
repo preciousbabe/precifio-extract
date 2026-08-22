@@ -308,7 +308,7 @@ exports.handler = async (event, context) => {
         console.error(`Post-save charge failed for ${extractionId}:`, chargeErr.message);
       }
     }
-
+    
        // ── 11. Update guest last_used only (count was set in orchestrator) ──
     if (isGuest && job.guest_id) {
       await supabase.from("guest_extractions").update({

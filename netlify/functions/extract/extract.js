@@ -42,7 +42,7 @@ function getRequestedJobId(event) {
 
 
 exports.handler = async (event, context) => {
-  context.callbackWaitsForEmptyEventLoop = false;
+  // REMOVED: context.callbackWaitsForEmptyEventLoop = false;
   console.log("[EXTRACT-ORCH] Handler started. Method:", event.httpMethod);
 
   const headers = {
@@ -417,12 +417,40 @@ exports.handler = async (event, context) => {
     const backgroundUrl = `${process.env.URL || "http://localhost:8888"}/.netlify/functions/extract-background`;
         console.log("[EXTRACT-ORCH] Background URL:", backgroundUrl);
         console.log("[EXTRACT-ORCH] About to fire background fetch for:", extractionId);
-    fetch(backgroundUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ extractionId }),
-    }).catch((err) => console.error("Background trigger failed:"));
-        console.log("[EXTRACT-ORCH] Background fetch fired. Returning 202 now.");
+
+    // THE FIX: await the fetch with a timeout so Lambda doesn't freeze before dispatch
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000); // 8 second max wait
+
+    let triggerOk = false;
+    try {
+      const res = await fetch(backgroundUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ extractionId }),
+        signal: controller.signal,
+      });
+      triggerOk = res.ok;
+      console.log("[EXTRACT-ORCH] Background trigger response:", res.status, res.statusText);
+    } catch (fetchErr) {
+      console.error("[EXTRACT-ORCH] Background trigger FETCH FAILED:", fetchErr.message);
+      // Clean up since background won't run
+      await supabase.from("extractions").update({
+        status: "failed",
+        error_message: "Failed to start background worker: " + fetchErr.message,
+        updated_at: new Date().toISOString(),
+      }).eq("id", extractionId);
+      await supabase.storage.from("extraction-uploads").remove([storagePath]).catch(() => {});
+      return {
+        statusCode: 500,
+        headers,
+        body: JSON.stringify({ error: "Failed to start extraction worker", message: fetchErr.message }),
+      };
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    console.log("[EXTRACT-ORCH] Background fetch fired. Returning 202 now.");
 
     // ── Return 202 Accepted immediately ──
     return {
