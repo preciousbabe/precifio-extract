@@ -43,6 +43,7 @@ function getRequestedJobId(event) {
 
 exports.handler = async (event, context) => {
   context.callbackWaitsForEmptyEventLoop = false;
+  console.log("[EXTRACT-ORCH] Handler started. Method:", event.httpMethod);
 
   const headers = {
     "Access-Control-Allow-Origin": "*",
@@ -270,8 +271,11 @@ exports.handler = async (event, context) => {
       }
     }
 
+    console.log("[EXTRACT-ORCH] Cached job check. Status:", cachedJob?.status, "HasResult:", !!cachedJob?.raw_result);
+
     // ── Return completed result immediately ──
   if (cachedJob?.status === "completed" && cachedJob.raw_result) {
+      console.log("[EXTRACT-ORCH] RETURNING CACHED result for:", cachedJob.id);
   const rawResult = cachedJob.raw_result;
   const docType = (
     rawResult.document_type ||
@@ -350,12 +354,14 @@ exports.handler = async (event, context) => {
 
     // ── Return 202 if still processing ──
     if (cachedJob?.status === "processing") {
+            console.log("[EXTRACT-ORCH] RETURNING EXISTING processing job:", cachedJob.id);
       return {
         statusCode: 202, headers,
         body: JSON.stringify({ status: "processing", jobId: cachedJob.id, extractionId: cachedJob.id, retryAfter: 3 }),
       };
     }
 
+        console.log("[EXTRACT-ORCH] No cache. Creating NEW job. ID:", extractionId);
     // ── Generate new job ID ──
     const extractionId = cachedJob?.id || crypto.randomUUID();
 
@@ -405,15 +411,18 @@ exports.handler = async (event, context) => {
       await supabase.storage.from("extraction-uploads").remove([storagePath]).catch(() => {});
       throw new Error(`Failed to create extraction job: ${dbError.message}`);
     }
+        console.log("[EXTRACT-ORCH] DB upsert succeeded for:", extractionId);
 
     // ── Trigger background worker ──
     const backgroundUrl = `${process.env.URL || "http://localhost:8888"}/.netlify/functions/extract-background`;
-    
+        console.log("[EXTRACT-ORCH] Background URL:", backgroundUrl);
+        console.log("[EXTRACT-ORCH] About to fire background fetch for:", extractionId);
     fetch(backgroundUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ extractionId }),
     }).catch((err) => console.error("Background trigger failed:"));
+        console.log("[EXTRACT-ORCH] Background fetch fired. Returning 202 now.");
 
     // ── Return 202 Accepted immediately ──
     return {
@@ -428,7 +437,7 @@ exports.handler = async (event, context) => {
     };
 
   } catch (err) {
-    console.error("Extract orchestrator error:");
+       console.error("[EXTRACT-ORCH] FATAL ERROR:", err.message, err.stack);
     return { statusCode: 500, headers, body: JSON.stringify({ error: "Extraction failed", message: err.message }) };
   }
 };

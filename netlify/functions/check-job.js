@@ -17,6 +17,7 @@ exports.handler = async (event) => {
   if (event.httpMethod !== "GET") return { statusCode: 405, headers, body: JSON.stringify({ error: "Method not allowed" }) };
 
   const jobId = event.queryStringParameters?.jobId;
+    console.log("[CHECK-JOB] Poll received. jobId:", jobId, "hasToken:", !!token, "hasGuest:", !!guestId);
   if (!jobId) return { statusCode: 400, headers, body: JSON.stringify({ error: "jobId required" }) };
 
   const authHeader = event.headers.authorization || event.headers.Authorization;
@@ -33,7 +34,7 @@ exports.handler = async (event) => {
     const { data: job, error: jobError } = await supabase.from("extractions")
       .select(`id, user_id, guest_id, status, file_name, file_type, document_type, estimated_cost, actual_cost, raw_result, error_message, created_at, updated_at`)
       .eq("id", jobId).maybeSingle();
-
+        console.log("[CHECK-JOB] DB lookup. Found:", !!job, "Status:", job?.status, "Error:", jobError?.message || "none");
     if (jobError) return { statusCode: 500, headers, body: JSON.stringify({ error: "Database error", message: jobError.message }) };
     if (!job) return { statusCode: 404, headers, body: JSON.stringify({ error: "Job not found", jobId }) };
 
@@ -56,6 +57,7 @@ exports.handler = async (event) => {
       const updatedAt = new Date(job.updated_at);
       const staleMinutes = (Date.now() - updatedAt.getTime()) / 60000;
       if (staleMinutes > STALE_MINUTES) {
+        console.log("[CHECK-JOB] Job is STALE (>10min). Marking failed:", jobId);
         await supabase.from("extractions").update({
           status: "failed", error_message: "Extraction timed out. Please retry.",
           updated_at: new Date().toISOString(),
@@ -91,6 +93,7 @@ exports.handler = async (event) => {
       } catch (e) { console.error("Balance lookup failed:", e.message); }
     }
 
+        console.log("[CHECK-JOB] Returning COMPLETED for:", jobId);
     return {
       statusCode: 200, headers,
       body: JSON.stringify({
@@ -120,7 +123,7 @@ exports.handler = async (event) => {
     };
 
   } catch (err) {
-    console.error("check-job error:", err);
+    console.error("[CHECK-JOB] FATAL:", err.message, err.stack);
     return { statusCode: 500, headers, body: JSON.stringify({ error: "Failed to check job", message: err.message }) };
   }
 };
