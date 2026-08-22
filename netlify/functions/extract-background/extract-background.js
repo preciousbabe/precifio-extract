@@ -93,34 +93,40 @@ async function cleanupOrphanedFiles(supabase) {
 }
 
 
-  exports.handler = async (event, context) => {
-    console.log("[EXTRACT-BG] === CONTAINER STARTED ===");
+exports.handler = async (event, context) => {
   context.callbackWaitsForEmptyEventLoop = false;
+  console.log("[EXTRACT-BG] === CONTAINER STARTED ===");
 
   // Background functions receive the event body directly
   let payload;
   try {
     payload = JSON.parse(event.body || "{}");
   } catch {
+    console.error("[EXTRACT-BG] Invalid JSON payload");
     return { statusCode: 400, body: JSON.stringify({ error: "Invalid payload" }) };
   }
 
   const { extractionId } = payload;
-    console.log("[EXTRACT-BG] Received extractionId:", extractionId);
-  if (!extractionId) return { statusCode: 400, body: JSON.stringify({ error: "extractionId required" }) };
+  if (!extractionId) {
+    console.error("[EXTRACT-BG] Missing extractionId");
+    return { statusCode: 400, body: JSON.stringify({ error: "extractionId required" }) };
+  }
+  console.log("[EXTRACT-BG] Received extractionId:", extractionId);
 
   const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
-    console.log("[EXTRACT-BG] Supabase client created");
+  console.log("[EXTRACT-BG] Supabase client created");
   await cleanupOrphanedFiles(supabase);
 
   try {
     // ── 1. Fetch job record ──
+    console.log("[EXTRACT-BG] Fetching job record:", extractionId);
     const { data: job, error: jobError } = await supabase.from("extractions")
       .select("*").eq("id", extractionId).single();
-          console.log("[EXTRACT-BG] Job lookup. Found:", !!job, "Error:", jobError?.message || "none");
+    console.log("[EXTRACT-BG] Job lookup. Found:", !!job, "Error:", jobError?.message || "none");
     if (jobError || !job) throw new Error("Job not found");
-    console.log("[EXTRACT-BG] Job status:", job.status, "Path:", job.storage_path, "isGuest:", !job.user_id);
+
     // ── 2. Idempotency: already completed? ──
+    console.log("[EXTRACT-BG] Job status:", job.status, "Path:", job.storage_path, "isGuest:", !job.user_id);
     if (job.status === "completed" && job.raw_result) {
       // console.log(`Background worker: ${extractionId} already completed. Skipping.`);
       await cleanupStorage(supabase, job.storage_path);
@@ -128,17 +134,19 @@ async function cleanupOrphanedFiles(supabase) {
     }
 
     // ── 3. Download file from storage ──
+    console.log("[EXTRACT-BG] Downloading file from storage:", job.storage_path);
     const { data: fileData, error: downloadError } = await supabase.storage
       .from("extraction-uploads").download(job.storage_path);
-          console.log("[EXTRACT-BG] Download result. Error:", downloadError?.message || "none", "Size:", fileData?.size || "n/a");
+    console.log("[EXTRACT-BG] Download result. Error:", downloadError?.message || "none", "Size:", fileData?.size || "n/a");
     if (downloadError) throw new Error(`Download failed: ${downloadError.message}`);
 
     const buffer = Buffer.from(await fileData.arrayBuffer());
     const file = { name: job.file_name, buffer, type: job.file_type, size: buffer.length };
 
     // ── 4. Extract text ──
+    console.log("[EXTRACT-BG] Buffer created. Length:", buffer.length);
     const extraction = await extractTextFromFile(file);
-        console.log("[EXTRACT-BG] Text extracted. Length:", extraction.text?.length, "Method:", extraction.metadata?.method);
+    console.log("[EXTRACT-BG] Text extracted. Length:", extraction.text?.length, "Method:", extraction.metadata?.method);
     let finalText = extraction.text;
     let extractionMethod = extraction.metadata.method;
     const cleanedText = cleanOCR(finalText || "");
@@ -170,8 +178,8 @@ async function cleanupOrphanedFiles(supabase) {
       }
     }
 
-        console.log("[EXTRACT-BG] About to call AI. Word count:", wordCount);
     // ── 6. AI Extraction ──
+    console.log("[EXTRACT-BG] About to call AI. Word count:", wordCount);
     let extractedData;
     let docType = "generic";
     let actualCost = cost;
@@ -179,11 +187,12 @@ async function cleanupOrphanedFiles(supabase) {
         let usage = null;
     try {
       const aiClient = new AIClient();
-      
+      // REQUIREMENT: your AIClient.extract() must now return { data, usage }
+      // usage = { prompt_tokens, completion_tokens, total_tokens, model }
       const aiResult = await aiClient.extract(cleanedText);
-     console.log("[EXTRACT-BG] AI success. Model:", usage?.model, "In:", usage?.prompt_tokens, "Out:", usage?.completion_tokens);
       extractedData = aiResult.data;
       usage = aiResult.usage || {};
+      console.log("[EXTRACT-BG] AI success. Model:", usage?.model, "In:", usage?.prompt_tokens, "Out:", usage?.completion_tokens);
 
       docType = (extractedData.document_type || extractedData.category || "generic").toString().toLowerCase().trim();
       actualCost = calculateExtractionCost({
@@ -193,6 +202,7 @@ async function cleanupOrphanedFiles(supabase) {
       });
 
     } catch (aiError) {
+      console.error("[EXTRACT-BG] AI extraction FAILED:", aiError.message);
       await supabase.from("extractions").update({
         status: "failed", error_message: aiError.message, actual_cost: 0,
         updated_at: new Date().toISOString(),
@@ -263,8 +273,9 @@ async function cleanupOrphanedFiles(supabase) {
       updated_at: new Date().toISOString(),
     };
 
+    console.log("[EXTRACT-BG] Saving result to DB...");
     const { error: saveError } = await supabase.from("extractions").update(resultPayload).eq("id", extractionId);
-        console.log("[EXTRACT-BG] DB save result. Error:", saveError?.message || "none");
+    console.log("[EXTRACT-BG] DB save result. Error:", saveError?.message || "none");
     if (saveError) throw new Error(`Failed to save result: ${saveError.message}`);
 
         // ── 10. CHARGE CREDITS (after successful save) ──
@@ -289,6 +300,7 @@ async function cleanupOrphanedFiles(supabase) {
         );
         if (deduction.success) {
           newBalance = deduction.balance;
+          console.log("[EXTRACT-BG] Charge complete. New balance:", newBalance);
         } else {
           console.error(`Post-save charge failed for ${extractionId}:`, deduction.error);
         }
@@ -296,7 +308,7 @@ async function cleanupOrphanedFiles(supabase) {
         console.error(`Post-save charge failed for ${extractionId}:`, chargeErr.message);
       }
     }
-    
+
        // ── 11. Update guest last_used only (count was set in orchestrator) ──
     if (isGuest && job.guest_id) {
       await supabase.from("guest_extractions").update({
@@ -306,12 +318,12 @@ async function cleanupOrphanedFiles(supabase) {
 
     // ── 12. Cleanup storage ──
     await cleanupStorage(supabase, job.storage_path);
-        console.log("[EXTRACT-BG] === JOB COMPLETED ===");
-    console.log(`Background worker completed: ${extractionId}`);
+
+    console.log("[EXTRACT-BG] === JOB COMPLETED ===", extractionId);
     return { statusCode: 200, body: JSON.stringify({ status: "completed", extractionId, newBalance }) };
 
   } catch (err) {
-       console.error("[EXTRACT-BG] === FATAL ERROR ===", err.message, err.stack);
+    console.error("[EXTRACT-BG] === FATAL ERROR ===", err.message, err.stack);
     // Mark job as failed if not already
     await supabase.from("extractions").update({
       status: "failed", error_message: err.message, updated_at: new Date().toISOString(),

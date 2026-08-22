@@ -17,12 +17,12 @@ exports.handler = async (event) => {
   if (event.httpMethod !== "GET") return { statusCode: 405, headers, body: JSON.stringify({ error: "Method not allowed" }) };
 
   const jobId = event.queryStringParameters?.jobId;
-    console.log("[CHECK-JOB] Poll received. jobId:", jobId, "hasToken:", !!token, "hasGuest:", !!guestId);
-  if (!jobId) return { statusCode: 400, headers, body: JSON.stringify({ error: "jobId required" }) };
 
   const authHeader = event.headers.authorization || event.headers.Authorization;
   const token = authHeader ? authHeader.replace(/^Bearer\s+/i, "") : null;
   const guestId = event.headers["x-guest-id"] || event.headers["X-Guest-Id"] || null;
+
+  console.log("[CHECK-JOB] Poll received. jobId:", jobId, "hasToken:", !!token, "hasGuest:", !!guestId);
 
   let userId = null;
   if (token) {
@@ -34,7 +34,8 @@ exports.handler = async (event) => {
     const { data: job, error: jobError } = await supabase.from("extractions")
       .select(`id, user_id, guest_id, status, file_name, file_type, document_type, estimated_cost, actual_cost, raw_result, error_message, created_at, updated_at`)
       .eq("id", jobId).maybeSingle();
-        console.log("[CHECK-JOB] DB lookup. Found:", !!job, "Status:", job?.status, "Error:", jobError?.message || "none");
+
+    console.log("[CHECK-JOB] DB lookup. Found:", !!job, "Status:", job?.status, "Error:", jobError?.message || "none");
     if (jobError) return { statusCode: 500, headers, body: JSON.stringify({ error: "Database error", message: jobError.message }) };
     if (!job) return { statusCode: 404, headers, body: JSON.stringify({ error: "Job not found", jobId }) };
 
@@ -42,7 +43,7 @@ exports.handler = async (event) => {
     const belongsToCurrentRequester =
       (job.user_id && userId && job.user_id === userId) ||
       (job.guest_id && guestId && job.guest_id === guestId);
-    
+
     if (!belongsToCurrentRequester) {
       return { 
         statusCode: 403, 
@@ -79,6 +80,7 @@ exports.handler = async (event) => {
     }
 
     // Completed
+    console.log("[CHECK-JOB] Returning COMPLETED for:", jobId);
     const result = job.raw_result;
     const documentType = (result.document_type || result.category || job.document_type || "generic").toString().toLowerCase().trim();
 
@@ -93,7 +95,6 @@ exports.handler = async (event) => {
       } catch (e) { console.error("Balance lookup failed:", e.message); }
     }
 
-        console.log("[CHECK-JOB] Returning COMPLETED for:", jobId);
     return {
       statusCode: 200, headers,
       body: JSON.stringify({

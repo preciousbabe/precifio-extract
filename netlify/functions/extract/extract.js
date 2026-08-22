@@ -361,9 +361,9 @@ exports.handler = async (event, context) => {
       };
     }
 
-        console.log("[EXTRACT-ORCH] No cache. Creating NEW job. ID:", extractionId);
     // ── Generate new job ID ──
     const extractionId = cachedJob?.id || crypto.randomUUID();
+    console.log("[EXTRACT-ORCH] No cache. Creating NEW job. ID:", extractionId);
 
     // ── Stage file to Supabase Storage ──
     const storagePath = `pending/${extractionId}/${file.name}`;
