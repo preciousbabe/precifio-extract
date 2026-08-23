@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pricing — Precifio Extract</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: #f8fafc;
+      color: #0f172a;
+      line-height: 1.6;
+    }
+    .container {
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 80px 20px 60px;
+      text-align: center;
+    }
+    h1 {
+      font-size: 36px;
+      font-weight: 800;
+      margin-bottom: 8px;
+      letter-spacing: -0.5px;
+    }
+    .subtitle {
+      color: #64748b;
+      font-size: 17px;
+      margin-bottom: 56px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 20px;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    .card {
+      background: #fff;
+      border-radius: 16px;
+      padding: 28px 24px;
+      border: 1px solid #e2e8f0;
+      position: relative;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 30px rgba(0,0,0,0.06);
+    }
+    .card.popular {
+      border: 2px solid #10b981;
+      background: #f0fdf4;
+    }
+    .card.mini {
+      border: 1px dashed #cbd5e1;
+      background: #f8fafc;
+    }
+    .badge {
+      position: absolute;
+      top: -10px;
+      right: 16px;
+      background: #10b981;
+      color: #fff;
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .name {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .credits {
+      font-size: 15px;
+      color: #334155;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .per {
+      font-size: 13px;
+      color: #64748b;
+      margin-bottom: 16px;
+    }
+    .price {
+      font-size: 32px;
+      font-weight: 800;
+      color: #1e40af;
+    }
+    .price span {
+      font-size: 15px;
+      font-weight: 400;
+      color: #64748b;
+    }
+    .card.mini .price {
+      color: #059669;
+      font-size: 26px;
+    }
+    .btn {
+      display: inline-block;
+      margin-top: 20px;
+      padding: 10px 24px;
+      background: #1e40af;
+      color: #fff;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 14px;
+      text-decoration: none;
+    }
+    .card.popular .btn {
+      background: #10b981;
+    }
+    .card.mini .btn {
+      background: #fff;
+      color: #059669;
+      border: 1px solid #059669;
+    }
+    .footer {
+      margin-top: 60px;
+      font-size: 13px;
+      color: #94a3b8;
+    }
+    .footer a {
+      color: #1e40af;
+      text-decoration: none;
+      margin: 0 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Simple, transparent pricing</h1>
+    <p class="subtitle">Pay as you go. Credits never expire. No subscriptions.</p>
+
+    <div class="grid">
+      <div class="card mini">
+        <div class="name">Quick Top-up</div>
+        <div class="credits">50 AI Credits</div>
+        <div class="per">$0.10 per credit</div>
+        <div class="price">$5 <span>USD</span></div>
+        <a href="/" class="btn">Get Started</a>
+      </div>
+
+      <div class="card">
+        <div class="name">Starter</div>
+        <div class="credits">100 AI Credits</div>
+        <div class="per">$0.10 per credit</div>
+        <div class="price">$10 <span>USD</span></div>
+        <a href="/" class="btn">Get Started</a>
+      </div>
+
+      <div class="card popular">
+        <span class="badge">MOST POPULAR</span>
+        <div class="name">Growth</div>
+        <div class="credits">275 AI Credits</div>
+        <div class="per">$0.091 per credit</div>
+        <div class="price">$25 <span>USD</span></div>
+        <a href="/" class="btn">Get Started</a>
+      </div>
+
+      <div class="card">
+        <div class="name">Business</div>
+        <div class="credits">600 AI Credits</div>
+        <div class="per">$0.083 per credit</div>
+        <div class="price">$50 <span>USD</span></div>
+        <a href="/" class="btn">Get Started</a>
+      </div>
+
+      <div class="card">
+        <div class="name">Enterprise</div>
+        <div class="credits">1,300 AI Credits</div>
+        <div class="per">$0.077 per credit</div>
+        <div class="price">$100 <span>USD</span></div>
+        <a href="/" class="btn">Get Started</a>
+      </div>
+    </div>
+
+    <div class="footer">
+      <p>Questions? Email us at <a href="mailto:support@precifio.app">support@precifio.app</a></p>
+      <p style="margin-top: 12px;">
+        <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a> · <a href="/refunds">Refunds</a>
+      </p>
+      <p style="margin-top: 8px;">&copy; 2026 Precifio AI</p>
+    </div>
+  </div>
+</body>
+</html>
