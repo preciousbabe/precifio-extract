@@ -116,16 +116,58 @@
       color: #059669;
       border: 1px solid #059669;
     }
-    .footer {
-      margin-top: 60px;
-      font-size: 13px;
-      color: #94a3b8;
-    }
-    .footer a {
-      color: #1e40af;
-      text-decoration: none;
-      margin: 0 8px;
-    }
+       .app-footer {
+  margin-top: 48px;
+  padding: 24px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--card);
+}
+
+.footer-inner {
+  max-width: 800px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+}
+
+.footer-brand {
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--text);
+}
+
+.footer-links {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.footer-links a {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.footer-links a:hover {
+  text-decoration: underline;
+}
+
+.footer-dot {
+  color: var(--muted);
+  font-size: 0.85rem;
+  user-select: none;
+}
+
+.footer-copy {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
   </style>
 </head>
 <body>
@@ -176,13 +218,22 @@
       </div>
     </div>
 
-    <div class="footer">
-      <p>Questions? Email us at <a href="mailto:support@precifio.app">support@precifio.app</a></p>
-      <p style="margin-top: 12px;">
-        <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a> · <a href="/refunds">Refunds</a>
-      </p>
-      <p style="margin-top: 8px;">&copy; 2026 Precifio AI</p>
+    
+    <footer class="app-footer">
+  <div class="footer-inner">
+    <span class="footer-brand">Precifio Extract</span>
+    <div class="footer-links">
+      <a href="/terms" target="_blank" rel="noopener noreferrer">Terms</a>
+      <span class="footer-dot">·</span>
+      <a href="/privacy" target="_blank" rel="noopener noreferrer">Privacy</a>
+      <span class="footer-dot">·</span>
+      <a href="/support" target="_blank" rel="noopener noreferrer">Support</a>
+      <span class="footer-dot">·</span>
+      <a href="/refund-policy" target="_blank" rel="noopener noreferrer">Policy</a>
     </div>
+    <span class="footer-copy">&copy; 2026 Precifio</span>
+  </div>
+</footer>
   </div>
 </body>
 </html>
