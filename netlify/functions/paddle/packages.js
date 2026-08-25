@@ -30,7 +30,7 @@ const PADDLE_PRICE_MAP = Object.freeze({
   /**
    * Starter — 100 Credits ($10.00)
    */
-  "pri_01m07w0he8my3apktgrdt9a6jj": Object.freeze({
+  "pri_01m0grp35gffe2e1v07x3tjafy": Object.freeze({
     packageId: "starter",
     credits: 100,
     priceCents: 1000,
