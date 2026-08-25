@@ -17,7 +17,6 @@ export function usePaddle() {
     script.src = 'https://cdn.paddle.com/paddle/v2/paddle.js';
     script.async = true;
     script.onload = initPaddle;
-    script.onerror = () => console.error('Failed to load Paddle.js');
     document.body.appendChild(script);
 
     return () => {};
@@ -25,7 +24,6 @@ export function usePaddle() {
 
   const initPaddle = () => {
     if (!window.Paddle) {
-      console.error('Paddle.js not available after load');
       return;
     }
 
@@ -45,7 +43,6 @@ export function usePaddle() {
 
   const openCheckout = useCallback((config = {}) => {
     if (!paddleRef.current) {
-      console.error('Paddle.js not initialized');
       return;
     }
 

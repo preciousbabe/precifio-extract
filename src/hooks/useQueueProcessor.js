@@ -78,7 +78,6 @@ export function useQueueProcessor(queueApi) {
             });
           }
         } catch (err) {
-          // console.error("Auto-recovery failed for", item.id, err.message, err.code);
 
           if (err.code === "JOB_STALE" || err.status === 409) {
             updateItem(item.id, {
@@ -192,8 +191,6 @@ export function useQueueProcessor(queueApi) {
     });
   } catch (err) {
     if (!isRecoveryMode) simulator.stop();
-
-    // console.error("Process error:", err.message, err.code, err.status, err.jobId);
 
     // ── STALE / FORCE FRESH ──
     if (err.code === "JOB_STALE") {

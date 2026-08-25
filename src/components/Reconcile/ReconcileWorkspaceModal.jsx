@@ -195,7 +195,6 @@ export default function ReconcileWorkspaceModal({ workspaceId, onClose }) {
       await fetchResults(workspaceId);
       try { await fetchMatchConfig(workspaceId); } catch {}
     } catch (err) {
-      console.error("Upload error:", err);
       alert("Failed to parse file: " + (err.message || "Unknown error"));
     }
   };
@@ -219,7 +218,6 @@ export default function ReconcileWorkspaceModal({ workspaceId, onClose }) {
       a.click();
       URL.revokeObjectURL(url);
     } catch (err) {
-      console.error("Export error:", err);
       alert("Export failed: " + (err.message || "Unknown error"));
     } finally {
       setExportingFormat(null);

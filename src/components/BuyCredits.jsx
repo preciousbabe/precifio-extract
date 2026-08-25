@@ -84,7 +84,6 @@ export function BuyCredits({ session, onClose, onSuccess, alert }) {
       });
 
     } catch (err) {
-      console.error('Purchase error:', err);
       setError(err.message || 'Something went wrong. Please try again.');
     } finally {
       setLoadingPkg(null);
@@ -185,7 +184,7 @@ export function BuyCredits({ session, onClose, onSuccess, alert }) {
                       {pkg.label}
                     </div>
                     <div style={{ fontSize: '14px', color: '#334155', marginTop: '4px', fontWeight: 600 }}>
-                      {pkg.credits} AI Credits
+                      {pkg.credits} Precifio Credits
                     </div>
                     {pkg.id !== 'mini' && (
                       <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>

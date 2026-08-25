@@ -29,7 +29,6 @@ export function AuthProvider({ children }) {
       }
 
       if (!res.ok) {
-        // console.warn(`Auth check returned ${res.status}, preserving session`);
         setLoading(false);
         return true;
       }
@@ -38,8 +37,7 @@ export function AuthProvider({ children }) {
       try {
         data = await res.json();
       } catch (parseErr) {
-        // 502 Bad Gateway sometimes returns HTML — don't log the user out for that
-        // console.warn('Auth response unparseable, preserving session');
+       
         setLoading(false);
         return true;
       }
@@ -53,13 +51,11 @@ export function AuthProvider({ children }) {
         return true;
       }
 
-      // 200 OK but no user object — weird, but don't wipe
-      // console.warn('Auth returned 200 but no user, preserving session');
       setLoading(false);
       return true;
 
     } catch (err) {
-      // Only wipe on explicit auth invalidation
+    
       if (err.message === 'AUTH_INVALID') {
         localStorage.removeItem('precifio_token');
         setUser(null);
@@ -68,8 +64,6 @@ export function AuthProvider({ children }) {
         return false;
       }
 
-      // Everything else (fetch failed, timeout, DNS, parse error, etc.) = transient
-      // console.warn('Network/transient auth error, preserving session:', err.message);
       setLoading(false);
       return true;
     } finally {
@@ -187,13 +181,12 @@ export function AuthProvider({ children }) {
       const res = await fetch('/.netlify/functions/auth-me', {
         headers: { Authorization: `Bearer ${token}` }
       });
-      if (!res.ok) return; // Never wipe here
+      if (!res.ok) return; 
       const data = await res.json();
       if (data.profile) {
         setProfile(data.profile);
       }
     } catch (err) {
-      // console.error('Refresh profile error:', err);
     }
   }, []);
 

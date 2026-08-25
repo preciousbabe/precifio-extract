@@ -17,7 +17,6 @@ export default function UserStats({ profile }) {
           setStats(data);
         }
       } catch (err) {
-        console.error('Stats error:', err);
       } finally {
         setLoading(false);
       }

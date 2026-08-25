@@ -76,7 +76,6 @@ async function recoverExistingJob(jobId, onProgress) {
   if (!jobId) return null;
   try { return await pollExistingJob(jobId, onProgress); }
   catch (error) {
-  //  console.warn("Recovery did not complete:", error.message);
   if (error.status === 404 || error.status === 403 || error.code === "JOB_STALE") return null;
   }
 }

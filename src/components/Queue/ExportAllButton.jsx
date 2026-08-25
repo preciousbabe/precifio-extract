@@ -111,7 +111,6 @@ export default function ExportAllButton({ items, config = {} }) {
       try {
         await downloadExport({ payload, format, config });
       } catch (err) {
-        console.error("Export failed:", err);
         alert("Export failed: " + err.message);
       }
       setExporting(false);
@@ -139,7 +138,6 @@ export default function ExportAllButton({ items, config = {} }) {
         const fileName = `${item.name.replace(/\.[^/.]+$/, "")}.${ext}`;
         folder.file(fileName, result.buffer, { binary: true });
       } catch (err) {
-        console.error(`Failed to export ${item.name}:`, err);
       }
     }
 

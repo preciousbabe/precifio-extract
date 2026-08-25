@@ -31,7 +31,6 @@ export default function AdminDashboard() {
           setData(json);
         }
       } catch (err) {
-        console.error(err);
       } finally {
         setLoading(false);
       }

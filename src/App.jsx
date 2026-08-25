@@ -13,6 +13,10 @@ import { useQueueProcessor } from "./hooks/useQueueProcessor";
 import { useNetworkStatus } from "./hooks/useNetworkStatus";
 import { AuthProvider, useAuth } from "./hooks/useAuth";
 import { PaymentSuccess } from './components/PaymentSuccess';
+import { ErrorProvider } from "./context/ErrorContext";
+import { AppErrorBoundary } from "./components/ErrorBoundary";
+import { ErrorModal } from "./components/ErrorModal";
+
 
 function AppContent() {
   // ✅ MUST be first — before any useEffect that uses these values
@@ -317,9 +321,14 @@ useEffect(() => {
 
 function App() {
   return (
-    <AuthProvider>
-      <AppContent />
-    </AuthProvider>
+    <ErrorProvider>
+      <AuthProvider>
+        <AppErrorBoundary>
+          <AppContent />
+        </AppErrorBoundary>
+      </AuthProvider>
+      <ErrorModal />
+    </ErrorProvider>
   );
 }
 

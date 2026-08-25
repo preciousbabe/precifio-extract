@@ -602,13 +602,11 @@ function ExportDropdown({ item, segments, onExport, user, disabled, config }) {
   break;
 }
         default:
-          console.warn("Unknown export format:", format);
           break;
       }
 
       if (onExport) onExport(format);
     } catch (err) {
-      console.error("Export failed:", err);
       alert(err.message || "Export failed.");
     } finally {
       setExporting(null);
@@ -820,7 +818,6 @@ export default function QueueViewer({ item, onClose, onExport, exportConfig = {}
       setIsEditing(false);
       setShowOriginal(false);
     } catch (err) {
-      console.error(err);
       alert(err.message || "Unable to save changes.");
     } finally {
       setIsSaving(false);
