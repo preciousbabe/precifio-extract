@@ -50,7 +50,7 @@ function calculateAICost(inputTokens, outputTokens, model = "default") {
 
 // Apply 60% margin: cost is 40% of final price
 function applyMargin(costUsd) {
-  return costUsd / 0.4;
+  return costUsd / 0.3;
 }
 
 // ── EXTRACTION ────────────────────────────────────────

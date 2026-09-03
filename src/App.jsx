@@ -177,66 +177,177 @@ useEffect(() => {
             <main className="app-main">
                 {!user && (
           <div className="guest-hero">
-            <div className="guest-hero-badge">🎉 1 Free Extraction — No Sign Up Required</div>
-            <h2 className="guest-headline">
-               Turn invoices, receipts, bank statements and 30+ document types into structured data in seconds.
-            </h2>
-            {/* <p className="guest-subheadline">
-              Snap a photo with your phone or drag & drop — PDF, JPG, PNG, and more supported
-            </p> */}
 
-            {/* <div className="format-badges">
-              <span className="fmt-badge"><span className="fmt-dot pdf"/>PDF</span>
-              <span className="fmt-badge"><span className="fmt-dot jpg"/>JPG</span>
-              <span className="fmt-badge"><span className="fmt-dot png"/>PNG</span>
-              <span className="fmt-badge"><span className="fmt-dot jpeg"/>JPEG</span>
-            </div> */}
+  <div className="guest-hero-badge">
+    🎉 1 Free Extraction — No Sign Up Required
+  </div>
 
-            <div className="steps-strip">
-              <div className="step">
-                <div className="step-icon">📸</div>
-                <div className="step-title">Snap or Drop</div>
-                <div className="step-desc">Phone camera or file</div>
-              </div>
-              <div className="step-arrow">→</div>
-              <div className="step">
-                <div className="step-icon">⚡</div>
-                <div className="step-title">AI Extracts</div>
-                <div className="step-desc">Structured in seconds</div>
-              </div>
-              <div className="step-arrow">→</div>
-              <div className="step">
-                <div className="step-icon">📥</div>
-                <div className="step-title">Export</div>
-                <div className="step-desc">JSON, Excel, PDF & more</div>
-              </div>
-            </div>
+  <h2 className="guest-headline">
+    AI Document Extraction for Invoices, Receipts, Bank Statements & More
+  </h2>
 
-            <div className="guest-features">
-              <span className="feature-item">✅ 10 free credits when you sign up</span>
-              <span className="feature-item">✅ No credit card required</span>
-              {/* <span className="feature-item">✅ Export to Xero & QuickBooks</span> */}
-              <span className="feature-item">✅ Batch processing supported</span>
-              <span className="feature-item">✅ Zero data retention — export before closing or your data is lost permanently.</span>
-                        </div>
+  <p className="guest-subheadline">
+    Extract structured data from financial and business documents in seconds.
+    Upload invoices, receipts, bank statements, purchase orders, PDFs and other
+    documents and turn them into usable data without manual data entry.
+  </p>
 
-            <button 
-              className="guest-signup-btn"
-              onClick={() => {
-                setShowAuthModal(true);
-                setAuthModalMode('signup');
-              }}
-            >
-              Sign Up Free — Get 10 Credits
-            </button>
-          </div>
-        )}
+  <div className="steps-strip">
 
-        <DocumentUploader
+    <div className="step">
+      <div className="step-icon">📸</div>
+      <div className="step-title">Upload Your Document</div>
+      <div className="step-desc">
+        PDF, JPG, PNG and more
+      </div>
+    </div>
+
+    <div className="step-arrow">→</div>
+
+    <div className="step">
+      <div className="step-icon">⚡</div>
+      <div className="step-title">AI Extracts the Data</div>
+      <div className="step-desc">
+        Structured information in seconds
+      </div>
+    </div>
+
+    <div className="step-arrow">→</div>
+
+    <div className="step">
+      <div className="step-icon">📥</div>
+      <div className="step-title">Export Your Data</div>
+      <div className="step-desc">
+        Excel, JSON, DOCX & PDF
+      </div>
+    </div>
+
+  </div>
+
+  <div className="guest-features">
+
+    <span className="feature-item">
+      ✅ AI invoice data extraction
+    </span>
+
+    <span className="feature-item">
+      ✅ Financial PDF data extraction
+    </span>
+
+    <span className="feature-item">
+      ✅ Bank statement & receipt extraction
+    </span>
+
+    <span className="feature-item">
+      ✅ Batch document processing
+    </span>
+
+    <span className="feature-item">
+      ✅ 10 free credits when you sign up
+    </span>
+
+    <span className="feature-item">
+      ✅ No credit card required
+    </span>
+
+    <span className="feature-item">
+      ✅ Zero data retention
+    </span>
+
+  </div>
+
+  <DocumentUploader
           onAddFiles={queue.addFiles}
           isProcessing={queue.processing}
         />
         <DocumentQueue queue={queue} />
+
+  <button
+    className="guest-signup-btn"
+    onClick={() => {
+      setShowAuthModal(true);
+      setAuthModalMode('signup');
+    }}
+  >
+    Sign Up Free — Get 10 Credits
+  </button>
+
+  {/* SEO content */}
+  <section className="seo-content">
+
+    <h2>
+      Extract Data from Financial Documents with AI
+    </h2>
+
+    <p>
+      Precifio Extract is an AI document extraction tool designed to help
+      businesses, accounting teams and finance professionals extract useful
+      information from financial documents without manually copying data.
+    </p>
+
+    <p>
+      Extract data from invoices, receipts, bank statements, purchase orders,
+      utility bills and other business documents. Precifio Extract processes
+      supported documents and converts the information into structured data
+      that can be exported for use in accounting and financial workflows.
+    </p>
+
+   <h3>
+  Extract Data from Any Business Document
+</h3>
+
+<p>
+  Precifio Extract uses AI to extract structured information from a wide range
+  of financial and business documents, including invoices, receipts, bank
+  statements, purchase orders, utility bills, contracts and other supported
+  document types. Extracted information can be used in accounting, finance and
+  business workflows without manually copying data from documents.
+</p>
+    <h3>
+      Financial PDF and Document Extraction
+    </h3>
+
+    <p>
+      Turn information contained in financial PDFs and business documents into
+      structured, usable data. Precifio Extract is designed for workflows where
+      teams need to move information from documents into spreadsheets,
+      applications or other financial processes.
+    </p>
+
+    <h3>
+      Built for Accounting and Finance Teams
+    </h3>
+
+    <p>
+      Precifio Extract can be useful for accounting firms, bookkeeping
+      companies, finance teams, accounts payable teams, accounts receivable
+      teams and businesses that process financial documents regularly.
+    </p>
+
+    <h3>
+      Export Extracted Data
+    </h3>
+
+    <p>
+      After extraction, users can export their structured information in
+      supported formats including Excel, JSON, DOCX and PDF.
+    </p>
+
+    <h3>
+      Financial Reconciliation Workflows
+    </h3>
+
+    <p>
+      Precifio also supports financial reconciliation workflows, helping users
+      compare financial records and investigate differences between records.
+    </p>
+
+  </section>
+
+    </div>
+        )}
+
+        
       </main>
 
 

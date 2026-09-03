@@ -83,9 +83,10 @@ export function BuyCredits({ session, onClose, onSuccess, alert }) {
         },
       });
 
-    } catch (err) {
+      setTimeout(() => setLoadingPkg(null), 2500);
+
+        } catch (err) {
       setError(err.message || 'Something went wrong. Please try again.');
-    } finally {
       setLoadingPkg(null);
     }
   };
