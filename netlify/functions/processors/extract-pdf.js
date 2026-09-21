@@ -20,9 +20,31 @@ if (typeof globalThis.Path2D === 'undefined') {
 const pdfjsLib = require('pdfjs-dist/legacy/build/pdf.js');
 const { createCanvas } = require('@napi-rs/canvas');
 const Tesseract = require('tesseract.js');
-
+const os = require('os');
+const path = require('path');
+const TESS_CACHE = path.join(os.tmpdir(), 'tesseract-cache');
 const pdfjsWorker = require('pdfjs-dist/legacy/build/pdf.worker.js');
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
+
+
+// pdfjs's built-in NodeCanvasFactory requires the old "canvas" package.
+// This factory is backed by @napi-rs/canvas so that code path is never hit.
+class NapiCanvasFactory {
+  create(width, height) {
+    const canvas = createCanvas(width, height);
+    return { canvas, context: canvas.getContext('2d') };
+  }
+  reset(freeCtx, width, height) {
+    freeCtx.canvas.width = width;
+    freeCtx.canvas.height = height;
+  }
+  destroy(canvasAndCtx) {
+    canvasAndCtx.canvas.width = 0;
+    canvasAndCtx.canvas.height = 0;
+    canvasAndCtx.context = null;
+    canvasAndCtx.canvas = null;
+  }
+}
 
 const SCALE = 2.0;
 
@@ -35,7 +57,10 @@ async function extractPDF(file) {
   //--------------------------------------------------------
 
   try {
-    const pdfDocument = await pdfjsLib.getDocument({ data: buffer }).promise;
+        const pdfDocument = await pdfjsLib.getDocument({
+      data: buffer,
+      canvasFactory: new NapiCanvasFactory()
+    }).promise;
     const numPages = pdfDocument.numPages;
     
     let fullText = '';
@@ -49,11 +74,13 @@ async function extractPDF(file) {
     
     const trimmedText = fullText.trim();
     
-    if (trimmedText.length > 50) {
+        if (trimmedText.length > 50) {
+      const pages = numPages;
+      await pdfDocument.destroy();
       return {
         text: trimmedText,
         metadata: {
-          pages: numPages,
+          pages,
           method: 'native-text',
           hasText: true
         }
@@ -74,153 +101,90 @@ async function extractPDF(file) {
 }
 
 async function tryOCR(buffer, knownPages, parseError = null) {
-  let numPages = knownPages;
-  
-  try {
-    if (!numPages) {
-      const doc = await pdfjsLib.getDocument({ data: buffer }).promise;
-      numPages = doc.numPages;
+    const docTask = pdfjsLib.getDocument({
+    data: buffer,
+    canvasFactory: new NapiCanvasFactory()
+  });
+  const doc = await docTask.promise;
+  const numPages = knownPages || doc.numPages;
+
+  const ocrTexts = [];
+  const ocrErrors = [];
+
+  // ONE worker for all pages: avoids re-spawning node workers and
+  // re-fetching eng.traineddata on every page
+  const worker = await Tesseract.createWorker('eng', Tesseract.OEM.LSTM_ONLY, {
+        cachePath: TESS_CACHE,
+    logger: message => {
+      if (message.status === 'recognizing text') {
+        console.log(`OCR: ${(message.progress * 100).toFixed(0)}%`);
+      }
     }
-    
-    const ocrTexts = [];
-    const ocrErrors = [];
-    
+  });
+
+  try {
     for (let i = 1; i <= numPages; i++) {
       try {
-        const doc = await pdfjsLib.getDocument({ data: buffer }).promise;
         const page = await doc.getPage(i);
         const viewport = page.getViewport({ scale: SCALE });
-        
+
         const canvas = createCanvas(viewport.width, viewport.height);
         const ctx = canvas.getContext('2d');
-        
-        await page.render({
+
+                await page.render({
           canvasContext: ctx,
-          viewport: viewport
+          viewport,
+          canvasFactory: new NapiCanvasFactory()
         }).promise;
-        
-        const pngBuffer = canvas.toBuffer('image/png');
-        
-        const result = await Tesseract.recognize(pngBuffer, 'eng', {
-          logger: message => {
-            if (message.status === 'recognizing text') {
-              console.log(`OCR page ${i}/${numPages}: ${(message.progress * 100).toFixed(0)}%`);
-            }
-          }
-        });
-        
-        ocrTexts.push(result.data.text);
-        console.log(`-> OCR complete for page ${i}/${numPages}`);
-        
+
+        // JPEG ~5-10x smaller than PNG: faster OCR, much less memory
+        const imgBuffer = canvas.toBuffer('image/jpeg', 85);
+
+        const { data } = await worker.recognize(imgBuffer);
+        ocrTexts.push(data.text);
+        console.log(`-> OCR page ${i}/${numPages} done (confidence: ${data.confidence})`);
+
+        page.cleanup();
       } catch (pageErr) {
         ocrErrors.push(`Page ${i}: ${pageErr.message}`);
         console.error(`-> OCR failed for page ${i}:`, pageErr.message);
       }
     }
-    
-    const mergedText = ocrTexts.filter(t => t.trim().length > 0).join('\n\n').trim();
-    
-    if (mergedText.length > 10) {
-      return {
-        text: mergedText,
-        metadata: {
-          pages: numPages,
-          method: 'ocr-fallback',
-          ocrPages: ocrTexts.length,
-          ocrErrors: ocrErrors.length > 0 ? ocrErrors : undefined,
-          note: parseError 
-            ? `pdfjs failed (${parseError.message}), used OCR` 
-            : 'Minimal native text, used OCR',
-          hasText: true
-        }
-      };
-    }
-    
+  } finally {
+    await worker.terminate().catch(() => {});
+    await docTask.destroy().catch(() => {});
+  }
+
+  const mergedText = ocrTexts.filter(t => t.trim().length > 0).join('\n\n').trim();
+
+  if (mergedText.length > 10) {
     return {
-      text: '',
+      text: mergedText,
       metadata: {
         pages: numPages,
-        method: 'ocr-fallback-empty',
-        error: ocrErrors.length > 0 ? ocrErrors.join('; ') : 'OCR produced no readable text',
-        parseError: parseError ? parseError.message : undefined,
-        needsOCR: true,
-        ocrFailed: true
-      }
-    };
-    
-  } catch (err) {
-    console.error('-> Canvas/OCR fallback failed:', err.message);
-    
-    if (err.message.includes('canvas') || err.message.includes('Canvas') || err.message.includes('createCanvas')) {
-      console.log('-> Canvas library failed, attempting emergency buffer OCR');
-      return await emergencyOCR(buffer, numPages, parseError);
-    }
-    
-    return {
-      text: '',
-      metadata: {
-        pages: numPages || 0,
-        method: 'failed',
-        error: `pdfjs: ${parseError?.message || 'unknown'} | OCR: ${err.message}`,
-        needsOCR: true,
-        ocrFailed: true
+        method: 'ocr-fallback',
+        ocrPages: ocrTexts.length,
+        ocrErrors: ocrErrors.length > 0 ? ocrErrors : undefined,
+        note: parseError
+          ? `pdfjs failed (${parseError.message}), used OCR`
+          : 'Minimal native text, used OCR',
+        hasText: true
       }
     };
   }
+
+  return {
+    text: '',
+    metadata: {
+      pages: numPages,
+      method: 'ocr-fallback-empty',
+      error: ocrErrors.length > 0 ? ocrErrors.join('; ') : 'OCR produced no readable text',
+      parseError: parseError ? parseError.message : undefined,
+      needsOCR: true,
+      ocrFailed: true
+    }
+  };
 }
 
-async function emergencyOCR(buffer, numPages, parseError = null) {
-  try {
-    console.log('-> Attempting emergency direct OCR on PDF buffer');
-    
-    const result = await Tesseract.recognize(buffer, 'eng', {
-      logger: m => {
-        if (m.status === 'recognizing text') {
-          console.log(`Emergency OCR: ${(m.progress * 100).toFixed(0)}%`);
-        }
-      }
-    });
-    
-    const text = result.data.text ? result.data.text.trim() : '';
-    
-    if (text.length > 10) {
-      return {
-        text: text,
-        metadata: {
-          pages: numPages || 1,
-          method: 'ocr-emergency-buffer',
-          note: 'Canvas failed, Tesseract parsed buffer directly',
-          hasText: true
-        }
-      };
-    }
-    
-    return {
-      text: '',
-      metadata: {
-        pages: numPages || 0,
-        method: 'ocr-emergency-empty',
-        error: 'Emergency OCR produced no readable text',
-        parseError: parseError ? parseError.message : undefined,
-        needsOCR: true,
-        ocrFailed: true
-      }
-    };
-    
-  } catch (err) {
-    console.error('-> Emergency OCR also failed:', err.message);
-    
-    return {
-      text: '',
-      metadata: {
-        pages: numPages || 0,
-        method: 'failed',
-        error: `pdfjs: ${parseError?.message || 'unknown'} | Canvas: failed | Emergency OCR: ${err.message}`,
-        needsOCR: true,
-        ocrFailed: true
-      }
-    };
-  }
-}
 
 module.exports = { extractPDF };

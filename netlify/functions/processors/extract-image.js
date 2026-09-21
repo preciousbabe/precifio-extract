@@ -3,16 +3,19 @@
 // Supports: JPG, JPEG, PNG, TIFF, BMP, WEBP.
 
 const Tesseract = require('tesseract.js');
+const os = require('os');
+const path = require('path');
+const TESS_CACHE = path.join(os.tmpdir(), 'tesseract-cache');
 
 async function extractImage(file) {
   try {
     const buffer =
       file.buffer || Buffer.from(file.content, 'base64');
+      
 
-    // Perform OCR using the English language model
-    const result = await Tesseract.recognize(buffer, 'eng', {
+        const result = await Tesseract.recognize(buffer, 'eng', {
+      cachePath: TESS_CACHE,
       logger: message => {
-        // Optional progress logging
         if (
           message.status === 'recognizing text' &&
           message.progress === 1

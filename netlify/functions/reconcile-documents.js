@@ -149,4 +149,3 @@ for (const d of documents) {
 
   return err(405, "Method not allowed");
 };
-

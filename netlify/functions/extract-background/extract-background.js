@@ -156,6 +156,7 @@ exports.handler = async (event, context) => {
         status: "failed", error_message: "Could not extract readable text from document",
         updated_at: new Date().toISOString(),
       }).eq("id", extractionId);
+      await rollbackGuestQuota(supabase, job.guest_id);
       await cleanupStorage(supabase, job.storage_path);
       return { statusCode: 422, body: JSON.stringify({ error: "Empty text extraction" }) };
     }
@@ -207,6 +208,7 @@ exports.handler = async (event, context) => {
         status: "failed", error_message: aiError.message, actual_cost: 0,
         updated_at: new Date().toISOString(),
       }).eq("id", extractionId);
+      await rollbackGuestQuota(supabase, job.guest_id);
       await cleanupStorage(supabase, job.storage_path);
       return { statusCode: 500, body: JSON.stringify({ error: "AI extraction failed", message: aiError.message }) };
     }
@@ -327,10 +329,21 @@ exports.handler = async (event, context) => {
     // Mark job as failed if not already
     await supabase.from("extractions").update({
       status: "failed", error_message: err.message, updated_at: new Date().toISOString(),
-    }).eq("id", extractionId).eq("status", "processing"); // Only if still processing
+    }).eq("id", extractionId).eq("status", "processing"); 
+
+        const { data: failedJob } = await supabase.from("extractions")
+      .select("guest_id").eq("id", extractionId).maybeSingle();
+    await rollbackGuestQuota(supabase, failedJob?.guest_id);
     return { statusCode: 500, body: JSON.stringify({ error: "Background extraction failed", message: err.message }) };
   }
 };
+
+async function rollbackGuestQuota(supabase, guestId) {
+  if (!guestId) return;
+  await supabase.from("guest_extractions")
+    .update({ extraction_count: 0, last_used: new Date().toISOString() })
+    .eq("guest_id", guestId);
+}
 
 async function cleanupStorage(supabase, path) {
   if (!path) return;

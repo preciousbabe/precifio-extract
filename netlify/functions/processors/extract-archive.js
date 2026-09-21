@@ -26,6 +26,9 @@ async function extractArchive(file) {
 
   const zip = new AdmZip(buffer);
 
+  const MAX_EXTRACTED_BYTES = 100 * 1024 * 1024; 
+  let totalUncompressed = 0;
+
   const entries = zip.getEntries();
 
   console.log('ZIP entries:', entries.length);
@@ -50,6 +53,13 @@ async function extractArchive(file) {
         reason: 'Unsupported file type'
       });
 
+      continue;
+    }
+
+        totalUncompressed += entry.header.size;
+    if (totalUncompressed > MAX_EXTRACTED_BYTES) {
+      console.log('Skipping entry over archive budget:', name);
+      skipped.push({ name, reason: 'Archive exceeds maximum extracted size' });
       continue;
     }
 

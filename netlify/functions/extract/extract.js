@@ -83,9 +83,10 @@ exports.handler = async (event, context) => {
     let requestedJobId = getRequestedJobId(event);
 
     // ── Idempotency key ──
-    const idempotencyKey = crypto.createHash("sha256").update(
-      file.buffer.toString("base64").slice(0, 8000) + (userId || guestId || "guest")
-    ).digest("hex");
+       const idempotencyKey = crypto.createHash("sha256")
+      .update(documentFingerprint)
+      .update(userId || guestId || "guest")
+      .digest("hex");
 
         // ── Guest limits (fail fast) ──
     if (isGuest) {
@@ -432,6 +433,7 @@ exports.handler = async (event, context) => {
       });
       triggerOk = res.ok;
       console.log("[EXTRACT-ORCH] Background trigger response:", res.status, res.statusText);
+      if (!res.ok) throw new Error(`Background worker responded ${res.status}`);
     } catch (fetchErr) {
       console.error("[EXTRACT-ORCH] Background trigger FETCH FAILED:", fetchErr.message);
       // Clean up since background won't run
@@ -466,6 +468,11 @@ exports.handler = async (event, context) => {
 
   } catch (err) {
        console.error("[EXTRACT-ORCH] FATAL ERROR:", err.message, err.stack);
+             if (isGuest && guestId) {
+        await supabase.from("guest_extractions")
+          .update({ extraction_count: 0 })
+          .eq("guest_id", guestId);
+      }
     return { statusCode: 500, headers, body: JSON.stringify({ error: "Extraction failed", message: err.message }) };
   }
 };

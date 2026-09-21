@@ -78,11 +78,19 @@ function extractTextFromDOCXNode(node) {
     }
 
     // Recurse through remaining nodes
+        // Paragraphs: join with newlines so text doesn't run together
+    if (node['w:p'] !== undefined) {
+      const paragraphs = Array.isArray(node['w:p']) ? node['w:p'] : [node['w:p']];
+      text += paragraphs.map(extractTextFromDOCXNode).join('\n') + '\n';
+    }
+
+    // Recurse through remaining nodes
     for (const key of Object.keys(node)) {
       if (
         key !== 'w:t' &&
         key !== 'w:tab' &&
-        key !== 'w:br'
+        key !== 'w:br' &&
+        key !== 'w:p'
       ) {
         text += extractTextFromDOCXNode(node[key]);
       }

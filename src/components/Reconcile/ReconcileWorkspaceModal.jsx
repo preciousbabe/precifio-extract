@@ -774,4 +774,3 @@ export default function ReconcileWorkspaceModal({ workspaceId, onClose }) {
 
   return createPortal(overlay, document.body);
 }
-

@@ -175,6 +175,12 @@ useEffect(() => {
       <NetworkStatus status={network} />
 
             <main className="app-main">
+              {user && (
+  <div className="user-main">
+    <DocumentUploader onAddFiles={queue.addFiles} isProcessing={queue.processing} />
+    <DocumentQueue queue={queue} />
+  </div>
+)}
                 {!user && (
           <div className="guest-hero">
 

@@ -9,6 +9,18 @@
   functions = "netlify/functions"
   framework = "#custom"
 
+
+
+ [functions]
+  node_bundler = "esbuild"
+  external_node_modules = [
+    "tesseract.js",
+    "tesseract.js-core",
+    "@napi-rs/canvas",
+    "canvas"
+  ]
+
+
 # ── STATIC PAGES (served before SPA catch-all) ──
 [[redirects]]
   from = "/terms"

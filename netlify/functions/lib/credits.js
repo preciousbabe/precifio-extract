@@ -1,4 +1,4 @@
-// netlify/functions/lib/credit.js
+// netlify/functions/lib/credits.js
 // ── UNIFIED TOKEN-BASED CREDIT ENGINE ──────────────────
 
 // 1 Precifio Credit = $0.10 USD
@@ -167,4 +167,3 @@ module.exports = {
   getUserCredits,
   deductCredits,
 };
-
