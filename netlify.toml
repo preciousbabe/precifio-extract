@@ -10,14 +10,13 @@
   framework = "#custom"
 
 
-
- [functions]
-  node_bundler = "esbuild"
+[functions]
   external_node_modules = [
+    "pdfjs-dist",
+    "jsdom",
     "tesseract.js",
     "tesseract.js-core",
-    "@napi-rs/canvas",
-    "canvas"
+    "@napi-rs/canvas"
   ]
 
 
@@ -80,3 +79,4 @@
     Access-Control-Allow-Origin = "*"
     Access-Control-Allow-Methods = "GET, POST, OPTIONS"
     Access-Control-Allow-Headers = "Content-Type, Authorization"
+

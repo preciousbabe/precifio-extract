@@ -19,12 +19,10 @@ if (typeof globalThis.Path2D === 'undefined') {
 
 const pdfjsLib = require('pdfjs-dist/legacy/build/pdf.js');
 const { createCanvas } = require('@napi-rs/canvas');
-const Tesseract = require('tesseract.js');
 const os = require('os');
 const path = require('path');
 const TESS_CACHE = path.join(os.tmpdir(), 'tesseract-cache');
-const pdfjsWorker = require('pdfjs-dist/legacy/build/pdf.worker.js');
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
+
 
 
 // pdfjs's built-in NodeCanvasFactory requires the old "canvas" package.
@@ -101,6 +99,7 @@ async function extractPDF(file) {
 }
 
 async function tryOCR(buffer, knownPages, parseError = null) {
+    const Tesseract = require('tesseract.js');
     const docTask = pdfjsLib.getDocument({
     data: buffer,
     canvasFactory: new NapiCanvasFactory()
@@ -113,14 +112,14 @@ async function tryOCR(buffer, knownPages, parseError = null) {
 
   // ONE worker for all pages: avoids re-spawning node workers and
   // re-fetching eng.traineddata on every page
-  const worker = await Tesseract.createWorker('eng', Tesseract.OEM.LSTM_ONLY, {
-        cachePath: TESS_CACHE,
-    logger: message => {
-      if (message.status === 'recognizing text') {
-        console.log(`OCR: ${(message.progress * 100).toFixed(0)}%`);
-      }
+ const worker = await Tesseract.createWorker('eng', Tesseract.OEM.LSTM_ONLY, {
+  cachePath: TESS_CACHE,
+  logger: message => {
+    if (message.status === 'recognizing text') {
+      console.log(`OCR: ${(message.progress * 100).toFixed(0)}%`);
     }
-  });
+  }
+});
 
   try {
     for (let i = 1; i <= numPages; i++) {
