@@ -10,6 +10,7 @@
   framework = "#custom"
 
 
+
 [functions]
   external_node_modules = [
     "pdfjs-dist",
@@ -17,6 +18,9 @@
     "tesseract.js",
     "tesseract.js-core",
     "@napi-rs/canvas"
+  ]
+  included_files = [
+    "node_modules/tesseract.js-core/*.wasm"
   ]
 
 
