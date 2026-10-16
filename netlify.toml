@@ -1,3 +1,4 @@
+
 [build]
   command = "vite build"
   publish = "dist"
@@ -9,8 +10,6 @@
   functions = "netlify/functions"
   framework = "#custom"
 
-
-
 [functions]
   external_node_modules = [
     "pdfjs-dist",
@@ -20,17 +19,17 @@
     "@napi-rs/canvas"
   ]
   included_files = [
-    "node_modules/tesseract.js-core/*.wasm"
+    "node_modules/tesseract.js-core/**/*.wasm",
+    "node_modules/pdfjs-dist/legacy/build/pdf.worker.js"
   ]
 
-
-# ── STATIC PAGES (served before SPA catch-all) ──
+# ── STATIC PAGES ──
 [[redirects]]
   from = "/terms"
   to = "/terms.html"
   status = 200
 
-  [[redirects]]
+[[redirects]]
   from = "/refund-policy"
   to = "/refund-policy.html"
   status = 200
@@ -40,7 +39,7 @@
   to = "/privacy.html"
   status = 200
 
-  [[redirects]]
+[[redirects]]
   from = "/pricing"
   to = "/pricing.html"
   status = 200
@@ -83,4 +82,3 @@
     Access-Control-Allow-Origin = "*"
     Access-Control-Allow-Methods = "GET, POST, OPTIONS"
     Access-Control-Allow-Headers = "Content-Type, Authorization"
-
